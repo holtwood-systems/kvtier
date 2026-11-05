@@ -1,0 +1,34 @@
+diff --git a/python/sglang/kernels/aot/CMakeLists.txt b/python/sglang/kernels/aot/CMakeLists.txt
+index 0d22047..208cb56 100644
+--- a/python/sglang/kernels/aot/CMakeLists.txt
++++ b/python/sglang/kernels/aot/CMakeLists.txt
+@@ -205,7 +205,7 @@ if (ENABLE_BELOW_SM90)
+ 
+ endif()
+ 
+-if ("${CUDA_VERSION}" VERSION_GREATER_EQUAL "12.8" OR SGL_KERNEL_ENABLE_SM100A)
++if (SGL_KERNEL_ENABLE_SM100A)
+     # sm_100f is available in CUDA 12.9+ and covers all sm_100, sm_103, sm_107, sm_10x
+     if ("${CUDA_VERSION}" VERSION_GREATER_EQUAL "12.9")
+         list(APPEND SGL_KERNEL_CUDA_FLAGS
+@@ -516,8 +516,8 @@ set(INFLLM_FLASH_CUDA_FLAGS
+ if (ENABLE_BELOW_SM90)
+     list(APPEND INFLLM_FLASH_CUDA_FLAGS "-gencode=arch=compute_80,code=sm_80")
+ endif()
+-list(APPEND INFLLM_FLASH_CUDA_FLAGS "-gencode=arch=compute_90,code=sm_90")
+-if ("${CUDA_VERSION}" VERSION_GREATER_EQUAL "12.8" OR SGL_KERNEL_ENABLE_SM100A)
++list(APPEND INFLLM_FLASH_CUDA_FLAGS "-gencode=arch=compute_89,code=sm_89")
++if (SGL_KERNEL_ENABLE_SM100A)
+     list(APPEND INFLLM_FLASH_CUDA_FLAGS "-gencode=arch=compute_120a,code=sm_120a")
+ endif()
+ 
+@@ -556,7 +556,8 @@ target_link_libraries(spatial_ops PRIVATE ${TORCH_LIBRARIES} c10 cuda)
+ install(TARGETS spatial_ops LIBRARY DESTINATION sgl_kernel)
+ 
+ # ============================ Extra Install: FLashMLA ============================= #
+-include(${CMAKE_CURRENT_LIST_DIR}/cmake/flashmla.cmake)
++# LOCAL-TRIM (not upstreamed): skip Hopper/Blackwell-only FlashMLA on sm_89 build host
++# include(${CMAKE_CURRENT_LIST_DIR}/cmake/flashmla.cmake)
+ 
+ # ============================ Extra Install: triton kernels ============================= #
+ install(DIRECTORY "${repo-triton_SOURCE_DIR}/python/triton_kernels/triton_kernels/"
