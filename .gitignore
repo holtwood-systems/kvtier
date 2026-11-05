@@ -17,3 +17,6 @@ bench/repro-31600/results/
 # Read-only upstream checkouts are nested repositories
 third_party/sglang/
 third_party/nano-vllm/
+
+# Local sgl-kernel source-build dependency cache (tarballs + unpacked trees)
+deps-sglk/
