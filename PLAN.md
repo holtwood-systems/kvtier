@@ -1,6 +1,6 @@
 # kvtier 后续开发计划
 
-更新时间：2026-10-26
+更新时间：2026-11-06
 
 ## 目标与边界
 
@@ -87,6 +87,17 @@
 - [x] 编写一次实验报告，包含硬件、软件 commit、模型、完整启动命令、参数、原始结果、
       统计方法、结论和限制。
   - 验收：报告只描述本机本次运行；不把 R/P 比值写成 #31600 复现或通用性能结论。
+- [x] 2026-11-05/06：原生 Linux / RTX 4090 五组消融矩阵（均为 commit
+  `6afee75f9...`、Qwen2.5-0.5B BF16、`hicache-io-backend` 与 dtype/graph/L3
+  单变量切换）：
+  - kernel L2 基线：R/P 中位 0.375（24.4 ms vs 65.1 ms），8/8 轮 host 命中
+    4223/4224，无需任何补丁；
+  - io-backend=direct：R/P 0.988、W 写入 TTFT 中位 1631.9 ms（vs kernel 65.6 ms）；
+  - kv fp8_e4m3：device 容量 1,555,940 → 3,111,880 tokens，R/P 0.392；
+  - disable-cuda-graph：R/P 0.416、写入慢 22%；
+  - storage-backend=file：负结果，8 个 W 前缀未在 L3 索引幸存，status=failed 保留。
+  证据均在 `bench/repro-31600/evidence/2026-11-05-linux-rtx4090-*/`；
+  工具链偏离项（torch 2.11、sgl-kernel 源码构建 sm_89）已写入各包 README。
 
 ### P3：根据数据选择优化方向
 
