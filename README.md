@@ -6,12 +6,12 @@
 
 > **项目状态**：**active**（研究演进中；已有完成审计的单卡 L2 结果包，
 > 尚无已合入的上游 PR）。权威状态注册表见
-> [open-infra-ai/open-infra-ai](https://github.com/open-infra-ai/open-infra-ai)。
+> [holtwood-systems/portfolio](https://github.com/holtwood-systems/portfolio)。
 
 本仓是研究孵化器：把上游源码阅读收敛为可运行实验、可审计结果和上游贡献。
 2026-10-25 经所有者决定提前转为公开并登记入组织状态注册表（`active`）；
 下方「公开门槛与现状」诚实记录各条达成状态，公开决策记录见
-[open-infra-ai 仓笔记](https://github.com/open-infra-ai/open-infra-ai/blob/master/.agents/notes/implemented/process/2026-10-25-kvtier-radar-publication.md)。
+[portfolio 仓笔记](https://github.com/holtwood-systems/portfolio/blob/master/.agents/notes/implemented/process/2026-10-25-kvtier-radar-publication.md)。
 
 ## 当前目录结构
 
