@@ -1,0 +1,16 @@
+== warmup：预热后清空缓存与指标 ==
+== W：写入 8 个相互隔离的 L2 候选 ==
+W TTFT median: 67.9 ms
+== 等待 10.0s，让 write_through 备份完成 ==
+== E：3343 个独立请求，共 3423232 tokens（device capacity=3111880） ==
+== M：逐轮配对测量 R(L2 reload) 与 P(cold prefill) ==
+trial 00 PR: ratio=0.444, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 01 PR: ratio=0.406, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 02 RP: ratio=0.389, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 03 PR: ratio=0.387, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 04 RP: ratio=0.391, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 05 PR: ratio=0.385, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 06 RP: ratio=0.401, R cache={'device': 0, 'host': 4223, 'storage': 0}
+trial 07 RP: ratio=0.392, R cache={'device': 0, 'host': 4223, 'storage': 0}
+配对 TTFT R/P median=0.392；该结果只描述本次单卡 L2 微基准，不代表复现 #31600。
+结果包：evidence/2026-11-05-linux-rtx4090-kv-fp8/results-20261106T001840Z.json

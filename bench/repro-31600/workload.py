@@ -275,7 +275,9 @@ def safe_server_snapshot(server_info: dict, model_info: dict) -> dict:
     return snapshot
 
 
-def validate_configuration(snapshot: dict) -> int:
+def validate_configuration(
+    snapshot: dict, expected_storage_backend: str | None = None
+) -> int:
     required = {
         "tp_size": 1,
         "dp_size": 1,
@@ -286,7 +288,7 @@ def validate_configuration(snapshot: dict) -> int:
         "hicache_host_memory_mode": "cache",
         "enable_metrics": True,
         "enable_cache_report": True,
-        "hicache_storage_backend": None,
+        "hicache_storage_backend": expected_storage_backend,
     }
     for key, expected in required.items():
         if snapshot.get(key) != expected:
@@ -306,9 +308,11 @@ def validate_cache_result(
     details = result["cached_tokens_details"]
     if phase == "R":
         minimum = math.floor(result["input_token_count"] * min_host_hit_ratio)
-        if details["host"] < minimum:
+        # host 与 storage 都是合法的分层命中；L2-only 配置下 storage 恒为 0
+        if details["host"] + details["storage"] < minimum:
             raise RuntimeError(
-                f"{result['rid']} 未形成足够的 L2 命中: host={details['host']}, "
+                f"{result['rid']} 未形成足够的分层命中: "
+                f"host={details['host']}, storage={details['storage']}, "
                 f"要求 >= {minimum}, details={details}"
             )
     elif sum(details.values()) != 0:
@@ -363,6 +367,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--backup-wait", type=float, default=10.0)
     parser.add_argument("--min-host-hit-ratio", type=float, default=0.90)
+    parser.add_argument(
+        "--expected-storage-backend",
+        default=None,
+        help="要求服务端 hicache_storage_backend 等于该值（如 file）；"
+        "开启后 R 阶段把 host+storage 都计为分层命中。",
+    )
     parser.add_argument("--seed", type=int, default=31600)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
@@ -421,7 +431,7 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
     model_info = client.get_json("/model_info")
     snapshot = safe_server_snapshot(server_info, model_info)
     record["server"] = snapshot
-    token_capacity = validate_configuration(snapshot)
+    token_capacity = validate_configuration(snapshot, args.expected_storage_backend)
 
     seed_ids, max_model_len = client.tokenize(_TOKEN_SEED)
     prompt_len = args.prefix_tokens + args.tail_tokens

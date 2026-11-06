@@ -11,11 +11,17 @@ HICACHE_IO="${HICACHE_IO:-kernel}"
 HICACHE_LAYOUT="${HICACHE_LAYOUT:-page_first}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-auto}"
 DISABLE_CUDA_GRAPH="${DISABLE_CUDA_GRAPH:-0}"
+# 可选 L3 后端（file/shm 等）；file 后端路径用
+# SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR 环境变量指定。
+HICACHE_STORAGE_BACKEND="${HICACHE_STORAGE_BACKEND:-}"
 
 EXTRA_ARGS=()
 if [ "$DISABLE_CUDA_GRAPH" = "1" ]; then
   # 小显存 / 小内存单卡上跳过 graph 捕获：省下 host 预留并缩短启动。
   EXTRA_ARGS+=(--disable-cuda-graph)
+fi
+if [ -n "$HICACHE_STORAGE_BACKEND" ]; then
+  EXTRA_ARGS+=(--hicache-storage-backend "$HICACHE_STORAGE_BACKEND")
 fi
 
 exec python3 -m sglang.launch_server \
