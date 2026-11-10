@@ -1,5 +1,6 @@
 import importlib.util
 import argparse
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -172,6 +173,17 @@ class WorkloadTest(unittest.TestCase):
         self.assertEqual(names, ["a.bin", "b.bin.tmp.1.2.abc"])
         self.assertEqual(entries[0]["size"], 10)
         self.assertIsNone(workload.storage_dir_snapshot(root / "missing"))
+
+    def test_jsonable_args_serializes_paths(self):
+        args = argparse.Namespace(
+            storage_dir=Path("/tmp/hicache"),
+            output_dir=Path("results"),
+            port=30000,
+            storage_backend=None,
+        )
+        dumped = json.dumps(workload.jsonable_args(args))
+        self.assertIn('"/tmp/hicache"', dumped)
+        self.assertIn('"results"', dumped)
 
     def test_bin_bytes_growth(self):
         before = [{"name": "a.bin", "size": 100, "mtime": 0.0}]

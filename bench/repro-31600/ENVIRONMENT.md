@@ -1,7 +1,33 @@
 # 环境记录（P0：版本与环境可追溯性）
 
-> 更新时间：2026-10-26。本文件记录构建与运行本基准所用的所有可追溯信息。
+> 更新时间：2026-11-11。本文件记录构建与运行本基准所用的所有可追溯信息。
 > 正式 GPU 运行时，`workload.py --sglang-commit` 必须与下文"服务端"一节的 commit 一致。
+
+## 2026-11-11 实际运行（WSL2 / RTX 5070 Ti，L3 file 后端）
+
+- OS：WSL2，Linux 6.18.33.2-microsoft-standard-WSL2；
+- GPU：RTX 5070 Ti 16384 MiB（sm_120），驱动 616.56（CUDA UMD 13.3）；RAM 16GB；
+- 服务端：SGLang `6afee75f918f3d59bdae7d619ba26b0ca22b1354`
+  （`0.0.0.dev1+g6afee75f9`，editable，`third_party/sglang` 浅克隆）+
+  **复打** `evidence/2026-10-26-wsl2-l2-baseline/sglang-43375-local.patch`
+  （pinned commit 不含 WSL2 host-alloc 修复；WSL2 必须，否则 kernel IO
+  cudaHostRegister 路径 illegal access）；
+- 构建坑位（本机新增）：
+  - rustc 1.90 < rustpython-ruff 要求 → `rustup update stable` → 1.99.1；
+  - HiCache native hash 扩展 JIT 编译需 `<openssl/sha.h>`；系统无
+    libssl-dev，用 miniconda openssl 3.6 经 `CPLUS_INCLUDE_PATH` /
+    `LIBRARY_PATH` 编译进 torch 扩展缓存（server 进程须带同样 env）；
+  - host 预算：`psutil.available − 10GiB 硬保留` − 进程占用 ≈ 0.83GB
+    → `HICACHE_RATIO` 压到 0.12（host pool 43,024 tokens / 0.53GB）；
+- 模型：`/home/shane/models/Qwen2.5-0.5B-Instruct`（HF BF16，snapshot 下载）；
+- 配置：`MEM_FRACTION=0.35`（device pool 358,532 tokens）、
+  `HICACHE_RATIO=0.12`、`HICACHE_IO=kernel`、`HICACHE_LAYOUT=page_first`、
+  `HICACHE_STORAGE_BACKEND=file` +
+  `SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR=/tmp/sglang-l3-storage`；
+- 结果：`evidence/2026-11-11-wsl2-rtx5070ti-l3-file/`，
+  status=failed / `index_evicted`（负结果，审计判定结构合法）；
+- workload.py 修复：`record["args"]` 对 Path 值未序列化导致失败包
+  写入崩溃 → `jsonable_args()`（DEV-20 交付的后续修复）。
 
 ## 2026-10-26 实际运行（WSL2 / RTX 3060 Laptop）
 

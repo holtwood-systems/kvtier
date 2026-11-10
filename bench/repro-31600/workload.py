@@ -678,6 +678,13 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
     )
 
 
+def jsonable_args(args: argparse.Namespace) -> dict:
+    return {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -703,7 +710,7 @@ def main() -> int:
             "server_host": args.host,
             "local_gpu_inventory": local_gpu_inventory(args.host),
         },
-        "args": {**vars(args), "output_dir": str(args.output_dir)},
+        "args": jsonable_args(args),
         "phases": {},
         "status": "running",
     }

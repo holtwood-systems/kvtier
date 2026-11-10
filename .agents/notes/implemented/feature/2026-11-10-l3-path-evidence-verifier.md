@@ -37,7 +37,7 @@ Status: implemented
   根本不查 L3；`LRUFileEvictor` 按盘容量驱逐 `.bin`；`StorageExistenceCache`
   做写侧去重（重复 key 跳写）。`metadata_cache`（TTL 5s）默认关。
 
-## Proposal
+## Decision
 
 ### workload.py
 
@@ -79,7 +79,7 @@ Status: implemented
 - README「证据约束」增补 L3 协议段；ENVIRONMENT.md 不动
   （commit 不变仍 `6afee75f9`）。
 
-## Acceptance criteria
+## 历史验收口径
 
 - `make test` 全过；旧 L2 证据包仍被审计器原样接受（兼容性回归）。
 - 合成 L3 complete 包：有路径证据→接受；缺 stage_counters/备份证据→拒。
@@ -105,6 +105,17 @@ Status: implemented
   无法指认某个 W 前缀是否落盘——已是诚实边界，写进 README。
 - 远端服务无 `--storage-dir` 时缺最强证据；此时 L3 complete 仅凭
   counter 增量也可过门禁，降级为次强证据档。
+
+## 后续修复与实跑结果（2026-11-11）
+
+- **修复**：`record["args"]` 直接灌 `vars(args)`，`--storage-dir` 的
+  Path 值导致失败包 JSON 序列化崩溃 → `jsonable_args()` 统一转 str，
+  补 `test_jsonable_args_serializes_paths`。
+- **实跑（WSL2/RTX 5070 Ti）**：`evidence/2026-11-11-wsl2-rtx5070ti-l3-file/`
+  status=failed / `index_evicted`，复现 11-05 4090 负结果——L3 索引随
+  host 条目同死在新硬件确认。新证据：`.bin` 为内容寻址，跨 run/跨
+  namespace dedup；`.bin` 增长不能区分 dedup-hit，`backuped_tokens_total`
+  含 dedup 尝试——解释写进了证据包 README 与验证器边界。
 
 ## Verification
 
