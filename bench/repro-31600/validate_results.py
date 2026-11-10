@@ -24,7 +24,14 @@ _EXPECTED_SERVER_CONFIG = {
     "hicache_host_memory_mode": "cache",
     "enable_metrics": True,
     "enable_cache_report": True,
-    "hicache_storage_backend": None,
+}
+_FAILURE_CLASSES = {
+    "config",
+    "not_backed_up",
+    "index_evicted",
+    "storage_read_failed",
+    "transfer_anomaly",
+    "unknown",
 }
 
 
@@ -119,6 +126,12 @@ def _validate_complete(record: dict) -> dict:
     _expect(isinstance(server, dict), "complete 结果缺少 server")
     for key, expected in _EXPECTED_SERVER_CONFIG.items():
         _expect(server.get(key) == expected, f"server.{key} 不符合基准边界")
+    expected_backend = args.get("expected_storage_backend")
+    _expect(
+        server.get("hicache_storage_backend") == expected_backend,
+        f"server.hicache_storage_backend={server.get('hicache_storage_backend')!r} "
+        f"与 args.expected_storage_backend={expected_backend!r} 不一致",
+    )
     _expect(
         server.get("hicache_write_policy") == "write_through",
         "write policy 不符合基准边界",
@@ -177,8 +190,9 @@ def _validate_complete(record: dict) -> dict:
         r_details = _validate_generation(results["R"], f"trial {index}.R", prompt_len)
         p_details = _validate_generation(results["P"], f"trial {index}.P", prompt_len)
         _expect(
-            r_details["host"] >= math.floor(prompt_len * min_host_hit_ratio),
-            f"trial {index}.R 的 host 命中率不足",
+            r_details["host"] + r_details["storage"]
+            >= math.floor(prompt_len * min_host_hit_ratio),
+            f"trial {index}.R 的分层命中率不足",
         )
         _expect(sum(p_details.values()) == 0, f"trial {index}.P 不是冷 prefill")
         ratio = results["R"]["ttft_s"] / results["P"]["ttft_s"]
@@ -195,6 +209,41 @@ def _validate_complete(record: dict) -> dict:
     _expect(isinstance(deltas, dict), "complete 结果缺少 counter_deltas")
     for name in _REQUIRED_COUNTERS:
         _number(deltas.get(name), f"metrics.counter_deltas.{name}", positive=True)
+
+    if expected_backend is not None:
+        stage_counters = metrics.get("stage_counters")
+        _expect(
+            isinstance(stage_counters, dict)
+            and isinstance(stage_counters.get("post_write"), dict)
+            and isinstance(stage_counters.get("post_evict"), dict),
+            "L3 complete 包缺少分阶段 counter 快照（metrics.stage_counters）",
+        )
+        backuped_delta = (
+            (stage_counters["post_evict"] or {}).get("sglang:backuped_tokens_total")
+            or 0
+        ) - ((metrics.get("counters_before") or {}).get(
+            "sglang:backuped_tokens_total"
+        ) or 0)
+        snapshots = record.get("storage_snapshots")
+        bin_growth = None
+        if isinstance(snapshots, dict):
+            def _bin_bytes(entries):
+                if not isinstance(entries, list):
+                    return None
+                return sum(
+                    item["size"]
+                    for item in entries
+                    if isinstance(item, dict) and str(item.get("name", "")).endswith(".bin")
+                )
+            pre = _bin_bytes(snapshots.get("pre_write"))
+            post = _bin_bytes(snapshots.get("post_evict"))
+            if pre is not None and post is not None:
+                bin_growth = post - pre
+        _expect(
+            backuped_delta > 0 or (bin_growth is not None and bin_growth > 0),
+            "L3 complete 包缺少 L3 落盘证据：backuped_tokens_total 无增量 "
+            "且 .bin 无增长——不能仅凭 cached_tokens_details.storage 声称经过 L3",
+        )
 
     summary = record.get("summary")
     _expect(isinstance(summary, dict), "complete 结果缺少 summary")
@@ -235,7 +284,18 @@ def validate_record(record: object) -> dict:
             isinstance(record.get("error"), str) and record["error"],
             "failed 结果缺少 error",
         )
-        return {"status": "failed", "run_id": record["run_id"], "error": record["error"]}
+        classification = record.get("failure_classification")
+        if classification is not None:
+            _expect(
+                classification in _FAILURE_CLASSES,
+                f"failure_classification={classification!r} 不在已知枚举",
+            )
+        return {
+            "status": "failed",
+            "run_id": record["run_id"],
+            "error": record["error"],
+            "failure_classification": classification,
+        }
     return _validate_complete(record)
 
 

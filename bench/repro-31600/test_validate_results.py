@@ -88,6 +88,26 @@ def complete_record():
     }
 
 
+def l3_complete_record():
+    record = complete_record()
+    record["args"]["expected_storage_backend"] = "file"
+    record["server"]["hicache_storage_backend"] = "file"
+    record["trials"][0]["results"]["R"]["cached_tokens_details"] = {
+        "device": 0,
+        "host": 0,
+        "storage": 12,
+    }
+    record["metrics"]["counters_before"] = {
+        "sglang:backuped_tokens_total": 0.0,
+    }
+    record["metrics"]["stage_counters"] = {
+        "post_write": {"sglang:backuped_tokens_total": 12.0},
+        "post_evict": {"sglang:backuped_tokens_total": 18.0},
+        "post_measure": {"sglang:backuped_tokens_total": 18.0},
+    }
+    return record
+
+
 class ValidateResultsTest(unittest.TestCase):
     def test_complete_record(self):
         result = validator.validate_record(complete_record())
@@ -117,6 +137,71 @@ class ValidateResultsTest(unittest.TestCase):
         record["summary"]["reload"] = None
         with self.assertRaises(validator.ValidationError):
             validator.validate_record(record)
+
+    def test_l3_complete_with_path_evidence(self):
+        result = validator.validate_record(l3_complete_record())
+        self.assertEqual(result["status"], "complete")
+
+    def test_l3_complete_rejected_without_path_evidence(self):
+        record = l3_complete_record()
+        record["metrics"]["stage_counters"]["post_evict"] = {
+            "sglang:backuped_tokens_total": 0.0
+        }
+        record["metrics"]["stage_counters"]["post_write"] = {
+            "sglang:backuped_tokens_total": 0.0
+        }
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(record)
+
+    def test_l3_complete_rejected_without_stage_counters(self):
+        record = l3_complete_record()
+        del record["metrics"]["stage_counters"]
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(record)
+
+    def test_l3_accepts_bin_growth_as_evidence(self):
+        record = l3_complete_record()
+        record["metrics"]["stage_counters"]["post_evict"] = {
+            "sglang:backuped_tokens_total": 0.0
+        }
+        record["storage_snapshots"] = {
+            "storage_dir": "/tmp/hicache",
+            "pre_write": [],
+            "post_write": [{"name": "a.bin", "size": 1024, "mtime": 1.0}],
+            "post_evict": [
+                {"name": "a.bin", "size": 1024, "mtime": 1.0},
+                {"name": "b.bin", "size": 2048, "mtime": 2.0},
+            ],
+        }
+        result = validator.validate_record(record)
+        self.assertEqual(result["status"], "complete")
+
+    def test_failed_with_classification_is_valid(self):
+        result = validator.validate_record(
+            {
+                "schema_version": 1,
+                "benchmark": "sglang-hicache-l2-single-gpu",
+                "run_id": "run",
+                "status": "failed",
+                "error": "R 未形成足够的分层命中",
+                "failure_classification": "index_evicted",
+            }
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failure_classification"], "index_evicted")
+
+    def test_failed_rejects_unknown_classification(self):
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(
+                {
+                    "schema_version": 1,
+                    "benchmark": "sglang-hicache-l2-single-gpu",
+                    "run_id": "run",
+                    "status": "failed",
+                    "error": "x",
+                    "failure_classification": "made_up_reason",
+                }
+            )
 
     def test_cli_reads_json_result(self):
         with tempfile.TemporaryDirectory() as directory:

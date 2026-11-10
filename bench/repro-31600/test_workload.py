@@ -1,5 +1,6 @@
 import importlib.util
 import argparse
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -48,6 +49,7 @@ class WorkloadTest(unittest.TestCase):
             backup_wait=0,
             min_host_hit_ratio=0.9,
             sglang_commit=None,
+            storage_dir=None,
             dry_run=False,
         )
         with self.assertRaises(ValueError):
@@ -65,6 +67,7 @@ class WorkloadTest(unittest.TestCase):
             backup_wait=0,
             min_host_hit_ratio=0.9,
             sglang_commit="0123456789abcdef0123456789abcdef01234567",
+            storage_dir=None,
             dry_run=False,
         )
         workload.validate_args(args)
@@ -137,6 +140,107 @@ class WorkloadTest(unittest.TestCase):
         )
         with self.assertRaises(RuntimeError):
             client.generate([1], "salt", "rid", 1)
+
+    def test_storage_dir_requires_localhost(self):
+        args = argparse.Namespace(
+            num_trials=1,
+            prefix_tokens=1,
+            tail_tokens=1,
+            max_new_tokens=1,
+            evict_request_tokens=1,
+            evict_factor=1.1,
+            evict_total_tokens=None,
+            backup_wait=0,
+            min_host_hit_ratio=0.9,
+            sglang_commit="0123456789abcdef0123456789abcdef01234567",
+            storage_dir=Path("/tmp/hicache"),
+            host="10.0.0.1",
+            dry_run=False,
+        )
+        with self.assertRaises(ValueError):
+            workload.validate_args(args)
+
+    def test_storage_dir_snapshot_lists_only_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a.bin").write_bytes(b"x" * 10)
+            (root / "b.bin.tmp.1.2.abc").write_bytes(b"y" * 5)
+            (root / "notes.txt").write_text("ignore me")
+            entries = workload.storage_dir_snapshot(root)
+        self.assertIsNotNone(entries)
+        names = [e["name"] for e in entries]
+        self.assertEqual(names, ["a.bin", "b.bin.tmp.1.2.abc"])
+        self.assertEqual(entries[0]["size"], 10)
+        self.assertIsNone(workload.storage_dir_snapshot(root / "missing"))
+
+    def test_bin_bytes_growth(self):
+        before = [{"name": "a.bin", "size": 100, "mtime": 0.0}]
+        after = before + [{"name": "b.bin", "size": 50, "mtime": 1.0}]
+        self.assertEqual(workload.bin_bytes_growth(before, after), 50)
+        self.assertIsNone(workload.bin_bytes_growth(None, after))
+
+    def _failed_record(self):
+        return {
+            "phases": {"W": [{"rid": "W"}]},
+            "metrics": {
+                "counters_before": {"sglang:backuped_tokens_total": 0.0},
+                "stage_counters": {},
+            },
+        }
+
+    def test_classify_config_failure(self):
+        self.assertEqual(
+            workload.classify_failure(RuntimeError("bad"), {"phases": {}}),
+            "config",
+        )
+
+    def test_classify_not_backed_up(self):
+        record = self._failed_record()
+        record["metrics"]["stage_counters"] = {
+            "post_write": {"sglang:backuped_tokens_total": 0.0},
+            "post_evict": {"sglang:backuped_tokens_total": 0.0},
+        }
+        self.assertEqual(
+            workload.classify_failure(
+                RuntimeError("未形成足够的分层命中"), record
+            ),
+            "not_backed_up",
+        )
+
+    def test_classify_index_evicted(self):
+        record = self._failed_record()
+        record["metrics"]["stage_counters"] = {
+            "post_write": {"sglang:backuped_tokens_total": 4096.0},
+            "post_evict": {"sglang:backuped_tokens_total": 8192.0},
+            "post_measure": {"sglang:load_back_tokens_total": 0.0},
+        }
+        self.assertEqual(
+            workload.classify_failure(
+                RuntimeError("未形成足够的分层命中"), record
+            ),
+            "index_evicted",
+        )
+
+    def test_classify_storage_read_failed(self):
+        record = self._failed_record()
+        self.assertEqual(
+            workload.classify_failure(
+                RuntimeError("Short read for key"), record
+            ),
+            "storage_read_failed",
+        )
+
+    def test_classify_transfer_anomaly(self):
+        record = self._failed_record()
+        record["metrics"]["stage_counters"] = {
+            "post_write": {"sglang:backuped_tokens_total": 4096.0},
+            "post_evict": {"sglang:backuped_tokens_total": 4096.0},
+            "post_measure": {"sglang:load_back_tokens_total": 100.0},
+        }
+        self.assertEqual(
+            workload.classify_failure(RuntimeError("x"), record),
+            "transfer_anomaly",
+        )
 
 
 if __name__ == "__main__":

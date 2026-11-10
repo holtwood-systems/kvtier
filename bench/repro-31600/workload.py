@@ -29,6 +29,8 @@ _METRIC_NAMES = (
     "sglang:hicache_backup_bytes_total",
     "sglang:hicache_backup_duration_seconds",
     "sglang:hicache_dropped_tokens_total",
+    "sglang:hicache_backup_dropped_tokens_total",
+    "sglang:backuped_tokens_total",
     "sglang:evicted_tokens_total",
     "sglang:load_back_tokens_total",
     "sglang:load_back_bytes_total",
@@ -36,6 +38,8 @@ _METRIC_NAMES = (
 )
 _COUNTER_NAMES = (
     "sglang:hicache_backup_tokens_total",
+    "sglang:backuped_tokens_total",
+    "sglang:hicache_backup_dropped_tokens_total",
     "sglang:evicted_tokens_total",
     "sglang:load_back_tokens_total",
     "sglang:load_back_bytes_total",
@@ -321,6 +325,78 @@ def validate_cache_result(
         )
 
 
+_FAILURE_CLASSES = (
+    "config",
+    "not_backed_up",
+    "index_evicted",
+    "storage_read_failed",
+    "transfer_anomaly",
+    "unknown",
+)
+
+
+def storage_dir_snapshot(storage_dir: Path) -> list[dict] | None:
+    """枚举 storage 目录中的 .bin 与 .tmp.* 页文件（仅本机服务可用）。"""
+    if not storage_dir.is_dir():
+        return None
+    entries = []
+    for path in sorted(storage_dir.iterdir()):
+        if not (path.name.endswith(".bin") or ".tmp." in path.name):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append(
+            {"name": path.name, "size": stat.st_size, "mtime": stat.st_mtime}
+        )
+    return entries
+
+
+def bin_bytes_growth(before: list[dict] | None, after: list[dict] | None) -> int | None:
+    """两个 .bin 快照之间的总字节增量；任一缺失返回 None。"""
+    if before is None or after is None:
+        return None
+    def total(entries: list[dict]) -> int:
+        return sum(item["size"] for item in entries if item["name"].endswith(".bin"))
+    return total(after) - total(before)
+
+
+def _stage_delta(record: dict, stage: str, name: str) -> float | None:
+    metrics = record.get("metrics") or {}
+    before = (metrics.get("counters_before") or {}).get(name)
+    stage_counters = (metrics.get("stage_counters") or {}).get(stage) or {}
+    after = stage_counters.get(name)
+    if after is None:
+        return None
+    return float(after) - float(before or 0.0)
+
+
+def classify_failure(exc: BaseException, record: dict) -> str:
+    """按已采集证据给失败归因；不匹配任何规则时如实返回 unknown。"""
+    if not (record.get("phases") or {}).get("W"):
+        return "config"
+    error_text = str(exc).lower()
+    if "short read" in error_text or "failed to fetch" in error_text:
+        return "storage_read_failed"
+    storage_writes = _stage_delta(
+        record, "post_evict", "sglang:backuped_tokens_total"
+    ) or _stage_delta(record, "post_write", "sglang:backuped_tokens_total")
+    snapshots = record.get("storage_snapshots") or {}
+    growth = bin_bytes_growth(snapshots.get("post_write"), snapshots.get("post_evict"))
+    if growth is None:
+        growth = bin_bytes_growth(snapshots.get("pre_write"), snapshots.get("post_write"))
+    backed_up = (storage_writes or 0) > 0 or (growth is not None and growth > 0)
+    if not backed_up:
+        return "not_backed_up"
+    load_back = _stage_delta(
+        record, "post_measure", "sglang:load_back_tokens_total"
+    )
+    if (load_back or 0) > 0:
+        return "transfer_anomaly"
+    return "index_evicted"
+
+
 def counter_snapshot(metrics_text: str) -> dict[str, float | None]:
     return {name: metric_total(metrics_text, name) for name in _COUNTER_NAMES}
 
@@ -373,6 +449,14 @@ def parse_args() -> argparse.Namespace:
         help="要求服务端 hicache_storage_backend 等于该值（如 file）；"
         "开启后 R 阶段把 host+storage 都计为分层命中。",
     )
+    parser.add_argument(
+        "--storage-dir",
+        type=Path,
+        default=None,
+        help="服务端 storage 后端的落盘目录（如 file 后端的 "
+        "SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR）；仅当服务在本机时有效，"
+        "用于分阶段快照 .bin 页文件作为 L3 路径证据。",
+    )
     parser.add_argument("--seed", type=int, default=31600)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
@@ -403,6 +487,12 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--backup-wait 不能小于 0")
     if not 0 < args.min_host_hit_ratio <= 1:
         raise ValueError("--min-host-hit-ratio 必须位于 (0, 1]")
+    if args.storage_dir is not None and args.host not in (
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    ):
+        raise ValueError("--storage-dir 仅在服务端位于本机时可用")
     if args.sglang_commit is None:
         if not args.dry_run:
             raise ValueError("正式运行必须提供 --sglang-commit（40 位 commit SHA）")
@@ -420,6 +510,16 @@ def print_dry_run(args: argparse.Namespace) -> None:
     print(f"试验数：{args.num_trials}；配对顺序：{plan}")
     print("E 阶段请求数将在运行时根据 /server_info 的 token_capacity 推导")
     print("W/R 每轮共用一个 salt；P 与 E 使用独立 salt，避免跨轮前缀污染")
+    print("分阶段 counter 快照：post_write / post_evict / post_measure")
+    if args.storage_dir is not None:
+        print(f"storage 目录快照：{args.storage_dir}（pre_write + 各阶段边界）")
+    else:
+        print("未传 --storage-dir：L3 证据将仅有 backuped_tokens_total counter")
+    if args.expected_storage_backend is not None:
+        print(
+            f"L3 模式：期望后端 {args.expected_storage_backend}，"
+            "R 命中按 host+storage 计，失败时写 failure_classification"
+        )
 
 
 def run_benchmark(args: argparse.Namespace, record: dict) -> None:
@@ -460,6 +560,20 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
         "before": filter_metrics(metrics_before),
         "counters_before": counters_before,
     }
+    if args.storage_dir is not None:
+        record["storage_snapshots"] = {
+            "storage_dir": str(args.storage_dir),
+            "pre_write": storage_dir_snapshot(args.storage_dir),
+        }
+
+    def capture_stage(stage: str) -> None:
+        record["metrics"].setdefault("stage_counters", {})[stage] = (
+            counter_snapshot(client.metrics())
+        )
+        if args.storage_dir is not None:
+            record["storage_snapshots"][stage] = storage_dir_snapshot(
+                args.storage_dir
+            )
 
     trial_salts = [f"l2-{run_id}-{i:03d}" for i in range(args.num_trials)]
     cold_salts = [f"cold-{run_id}-{i:03d}" for i in range(args.num_trials)]
@@ -476,6 +590,7 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
 
     print(f"== 等待 {args.backup_wait:.1f}s，让 write_through 备份完成 ==")
     time.sleep(args.backup_wait)
+    capture_stage("post_write")
 
     evict_total = args.evict_total_tokens or math.ceil(
         token_capacity * args.evict_factor
@@ -501,6 +616,8 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
                 args.max_new_tokens,
             )
         )
+
+    capture_stage("post_evict")
 
     plan = build_measurement_plan(args.num_trials, args.seed)
     record["measurement_plan"] = plan
@@ -530,6 +647,11 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
         )
     metrics_after = client.metrics()
     counters_after = counter_snapshot(metrics_after)
+    record["metrics"].setdefault("stage_counters", {})["post_measure"] = counters_after
+    if args.storage_dir is not None:
+        record["storage_snapshots"]["post_measure"] = storage_dir_snapshot(
+            args.storage_dir
+        )
     deltas = counter_deltas(counters_before, counters_after)
     record["metrics"].update(
         {
@@ -595,7 +717,11 @@ def main() -> int:
     except (requests.RequestException, RuntimeError, ValueError, KeyError) as exc:
         record["status"] = "failed"
         record["error"] = str(exc)
-        print(f"基准失败：{exc}", file=sys.stderr)
+        record["failure_classification"] = classify_failure(exc, record)
+        print(
+            f"基准失败：{exc}（failure_classification={record['failure_classification']}）",
+            file=sys.stderr,
+        )
         exit_code = 1
     finally:
         record["finished_at_utc"] = datetime.now(timezone.utc).isoformat()

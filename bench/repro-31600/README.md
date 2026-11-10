@@ -21,9 +21,18 @@
 - 通过 `/tokenize` 构造精确等长的 `input_ids`，不再用字符数估算 token 数；
 - 每轮 W/R 共用一个 `cache_salt`，不同轮次及 P/E 请求使用独立 salt；
 - 从 `/server_info` 读取实际 device `token_capacity`，据此生成超过容量的驱逐流量；
-- R 请求必须报告足量 `cached_tokens_details.host`，P 请求必须为零命中，否则整次
-  实验标记为失败；
+- R 请求必须报告足量 `cached_tokens_details.host`（开启 storage 后端时为
+  `host + storage` 分层命中），P 请求必须为零命中，否则整次实验标记为失败；
 - Prometheus 的 backup、eviction、load-back counter 都必须出现正增量；
+- **L3（`--expected-storage-backend` 非空）额外要求路径证据**：结果包须含
+  `metrics.stage_counters`（post_write/post_evict/post_measure 分阶段 counter 快照），
+  且 `sglang:backuped_tokens_total` 有正增量或 `storage_snapshots` 显示 `.bin`
+  增长；不能仅凭 `cached_tokens_details.storage` 声称经过了 L3；
+- `--storage-dir`（仅本机服务）在 W/E/M 各边界枚举 `.bin` 页文件
+  `{name,size,mtime}`，把"数据是否真正落盘"与"索引是否幸存"拆开；
+- 失败包带 `failure_classification`：`config / not_backed_up / index_evicted /
+  storage_read_failed / transfer_anomaly / unknown`，由客户端可采集证据归因，
+  匹配不到规则如实记 unknown；
 - R/P 采用固定随机种子的配对、平衡顺序，所有原始响应、配置白名单和相关指标写入
   JSON 结果包；
 - SSE 解析错误、异常结束或没有输出 token 事件都会失败，不会用总耗时冒充 TTFT。
