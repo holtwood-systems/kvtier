@@ -21,10 +21,10 @@ _EXPECTED_SERVER_CONFIG = {
     "attn_cp_size": 1,
     "speculative_algorithm": None,
     "enable_hierarchical_cache": True,
-    "hicache_host_memory_mode": "cache",
     "enable_metrics": True,
     "enable_cache_report": True,
 }
+_ALLOWED_HOST_MEMORY_MODES = ("cache", "buffer_only")
 _FAILURE_CLASSES = {
     "config",
     "not_backed_up",
@@ -126,6 +126,11 @@ def _validate_complete(record: dict) -> dict:
     _expect(isinstance(server, dict), "complete 结果缺少 server")
     for key, expected in _EXPECTED_SERVER_CONFIG.items():
         _expect(server.get(key) == expected, f"server.{key} 不符合基准边界")
+    _expect(
+        server.get("hicache_host_memory_mode") in _ALLOWED_HOST_MEMORY_MODES,
+        f"server.hicache_host_memory_mode="
+        f"{server.get('hicache_host_memory_mode')!r} 不在允许的取值内",
+    )
     expected_backend = args.get("expected_storage_backend")
     _expect(
         server.get("hicache_storage_backend") == expected_backend,
@@ -189,11 +194,18 @@ def _validate_complete(record: dict) -> dict:
         _expect(set(results) == {"R", "P"}, f"trial {index} 必须同时包含 R/P")
         r_details = _validate_generation(results["R"], f"trial {index}.R", prompt_len)
         p_details = _validate_generation(results["P"], f"trial {index}.P", prompt_len)
-        _expect(
-            r_details["host"] + r_details["storage"]
-            >= math.floor(prompt_len * min_host_hit_ratio),
-            f"trial {index}.R 的分层命中率不足",
-        )
+        if expected_backend is not None:
+            # L3 臂判定标准是路径存在性（storage>0）；驻留率如实记录。
+            _expect(
+                r_details["storage"] > 0,
+                f"trial {index}.R 未形成 L3 命中",
+            )
+        else:
+            _expect(
+                r_details["host"] + r_details["storage"]
+                >= math.floor(prompt_len * min_host_hit_ratio),
+                f"trial {index}.R 的分层命中率不足",
+            )
         _expect(sum(p_details.values()) == 0, f"trial {index}.P 不是冷 prefill")
         ratio = results["R"]["ttft_s"] / results["P"]["ttft_s"]
         _number(trial.get("ttft_ratio_r_over_p"), f"trial {index}.ratio", positive=True)

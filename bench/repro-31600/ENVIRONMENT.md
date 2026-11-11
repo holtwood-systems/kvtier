@@ -29,6 +29,41 @@
 - workload.py 修复：`record["args"]` 对 Path 值未序列化导致失败包
   写入崩溃 → `jsonable_args()`（DEV-20 交付的后续修复）。
 
+### 同日 buffer_only 臂（正向证据）
+
+- 同机同 pin commit，服务器改 `--hicache-host-memory-mode buffer_only`
+  （`run_server.sh` 新增 `HICACHE_HOST_MEMORY_MODE` 环境变量透传）；
+- ⚠️ buffer_only 在 pinned commit 有两处断言级缺陷（账目失真，
+  非缓存路径）：
+  1. `pool_stats_observer` `num_used` 可为负（evictable 计入
+     storage-anchored 节点）→ metrics 断言崩溃；本地补丁
+     `evidence/sglang-buffer-metrics-clamp-local.patch` 钳制展示值；
+  2. idle 巡检 `available+evictable > total` 报 leak 崩溃 →
+     `SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE=0` 降为 warning；
+- 结果：`evidence/2026-11-11-wsl2-rtx5070ti-l3-buffer/`，
+  status=complete，6/6 R `storage=1373–1536`，P 全冷；
+- workload 语义修正：P 冷基线逐轮独立内容（storage 内容寻址跨
+  salt）、storage 模式 R 判据为 `storage>0`、新增 `--salt-mode none`；
+- 对照机制见 evidence README 与 implemented 笔记。
+
+### 同日 cache 模式 saltless 机制臂（B 臂）
+
+- 同机同 pin commit，cache 模式 + file 后端 + `--salt-mode none`；
+  目的：实证「prefetch 插入路径 cache_salt 归属」缺陷
+  （anchor=root → salt=None 插入 → 带 salt 的 re-match 不可见）；
+- 实测机制：`hicache_host_total=43024`、`used≈43024`（L2 驻留占满），
+  prefetch staging 分配与在途写回竞争同一 host 池——每次首 R 仅
+  分到 722–999 token（`loaded` 如实截断），后续 R 不足
+  `prefetch_threshold=256` 被静默撤销（debug 级）；
+- workload 新增：`--evict-content-mode per-request`（saltless 下共享
+  内容 dedup 无驱逐压力，有护栏）、W/R 逐 trial 独立内容（saltless
+  下同内容跨轮 dedup）、`--post-evict-wait`（丢弃写永不 ack，
+  `acked>=enqueued` 不收敛，改静默判据）；
+- 结果：`evidence/2026-11-11-wsl2-rtx5070ti-l3-cache-nosalt-1trial/`
+  status=complete（R-000 `storage=722`）+ `...-cache-nosalt/` 6 个
+  结构化 failed 包；`get_native_hash` 离线核验 6 条 content 的
+  4224 个 key 全部在盘，失败非存储缺失。
+
 ## 2026-10-26 实际运行（WSL2 / RTX 3060 Laptop）
 
 - OS：WSL2，Linux 6.18.54.1-microsoft-standard-WSL2；

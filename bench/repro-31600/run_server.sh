@@ -14,6 +14,9 @@ DISABLE_CUDA_GRAPH="${DISABLE_CUDA_GRAPH:-0}"
 # 可选 L3 后端（file/shm 等）；file 后端路径用
 # SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR 环境变量指定。
 HICACHE_STORAGE_BACKEND="${HICACHE_STORAGE_BACKEND:-}"
+# host 内存模式：cache（L2 host 缓存，默认）或 buffer_only（仅 staging，
+# L3 命中经 staged prefetch 直接拼入，不依赖 radix 路径存活）。
+HICACHE_HOST_MEMORY_MODE="${HICACHE_HOST_MEMORY_MODE:-cache}"
 
 EXTRA_ARGS=()
 if [ "$DISABLE_CUDA_GRAPH" = "1" ]; then
@@ -30,7 +33,7 @@ exec python3 -m sglang.launch_server \
   --mem-fraction-static "$MEM_FRACTION" \
   --kv-cache-dtype "$KV_CACHE_DTYPE" \
   --enable-hierarchical-cache \
-  --hicache-host-memory-mode cache \
+  --hicache-host-memory-mode "$HICACHE_HOST_MEMORY_MODE" \
   --hicache-ratio "$HICACHE_RATIO" \
   --hicache-mem-layout "$HICACHE_LAYOUT" \
   --hicache-write-policy write_through \

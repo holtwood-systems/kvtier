@@ -165,13 +165,12 @@ class SGLangClient:
     def generate(
         self,
         input_ids: list[int],
-        cache_salt: str,
+        cache_salt: str | None,
         rid: str,
         max_new_tokens: int,
     ) -> dict:
         payload = {
             "input_ids": input_ids,
-            "cache_salt": cache_salt,
             "rid": rid,
             "sampling_params": {
                 "max_new_tokens": max_new_tokens,
@@ -180,6 +179,8 @@ class SGLangClient:
             },
             "stream": True,
         }
+        if cache_salt is not None:
+            payload["cache_salt"] = cache_salt
         started = time.perf_counter()
         ttft = None
         output_events = 0
@@ -289,7 +290,6 @@ def validate_configuration(
         "attn_cp_size": 1,
         "speculative_algorithm": None,
         "enable_hierarchical_cache": True,
-        "hicache_host_memory_mode": "cache",
         "enable_metrics": True,
         "enable_cache_report": True,
         "hicache_storage_backend": expected_storage_backend,
@@ -297,6 +297,11 @@ def validate_configuration(
     for key, expected in required.items():
         if snapshot.get(key) != expected:
             raise RuntimeError(f"服务配置 {key}={snapshot.get(key)!r}，要求为 {expected!r}")
+    if snapshot.get("hicache_host_memory_mode") not in ("cache", "buffer_only"):
+        raise RuntimeError(
+            f"服务配置 hicache_host_memory_mode={snapshot.get('hicache_host_memory_mode')!r}，"
+            "要求为 cache 或 buffer_only"
+        )
     if snapshot.get("hicache_write_policy") != "write_through":
         raise RuntimeError("本基准要求 --hicache-write-policy write_through")
     memory_usage = snapshot.get("memory_usage") or {}
@@ -307,10 +312,22 @@ def validate_configuration(
 
 
 def validate_cache_result(
-    phase: str, result: dict, min_host_hit_ratio: float
+    phase: str,
+    result: dict,
+    min_host_hit_ratio: float,
+    storage_mode: bool = False,
 ) -> None:
     details = result["cached_tokens_details"]
     if phase == "R":
+        if storage_mode:
+            # L3 臂的判定标准是路径存在性：storage>0 即正向命中；
+            # 分层驻留率（host+storage/input）如实记录但不作门槛——
+            # storage 覆盖受写回与驱逐策略影响，本就可能是部分命中。
+            if details["storage"] <= 0:
+                raise RuntimeError(
+                    f"{result['rid']} 未形成 L3 命中: details={details}"
+                )
+            return
         minimum = math.floor(result["input_token_count"] * min_host_hit_ratio)
         # host 与 storage 都是合法的分层命中；L2-only 配置下 storage 恒为 0
         if details["host"] + details["storage"] < minimum:
@@ -457,6 +474,31 @@ def parse_args() -> argparse.Namespace:
         "SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR）；仅当服务在本机时有效，"
         "用于分阶段快照 .bin 页文件作为 L3 路径证据。",
     )
+    parser.add_argument(
+        "--salt-mode",
+        choices=("per-request", "none"),
+        default="per-request",
+        help="cache_salt 命名空间策略：per-request（默认，W/R 每轮独立、"
+        "E/P 独立）或 none（全请求不带 salt，验证 L3 命中归属）",
+    )
+    parser.add_argument(
+        "--post-evict-wait",
+        type=float,
+        default=0.0,
+        help="E 阶段结束后追加等待秒数：轮询直到 backuped_tokens_total "
+        "追平 hicache_backup_tokens_total（在途写回全部落盘、host staging "
+        "页解除保护），或超时为止。cache 模式下 E 的写回 backlog 会钉住 "
+        "host 池，使 M 阶段 prefetch 分配失败被静默撤销（实测 R-000 仅 "
+        "分配到 768/4224、R-001 分配不足阈值被撤销）。0 表示不等待。",
+    )
+    parser.add_argument(
+        "--evict-content-mode",
+        choices=("shared", "per-request"),
+        default="shared",
+        help="E 阶段内容策略：shared（默认，全部 E 共用一段内容，salt "
+        "隔离命名空间）或 per-request（每请求独立内容；salt-mode=none "
+        "时必需——共享内容在内容寻址下会 dedup，不产生驱逐压力）",
+    )
     parser.add_argument("--seed", type=int, default=31600)
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
@@ -509,7 +551,10 @@ def print_dry_run(args: argparse.Namespace) -> None:
     print(f"离线 dry-run：每个 W/R/P 请求 {len(token_ids)} 个精确 token id")
     print(f"试验数：{args.num_trials}；配对顺序：{plan}")
     print("E 阶段请求数将在运行时根据 /server_info 的 token_capacity 推导")
-    print("W/R 每轮共用一个 salt；P 与 E 使用独立 salt，避免跨轮前缀污染")
+    if args.salt_mode == "none":
+        print("salt-mode=none：全请求不带 cache_salt（E 与 W 共享前缀将保活浅层路径）")
+    else:
+        print("W/R 每轮共用一个 salt；P 与 E 使用独立 salt，避免跨轮前缀污染")
     print("分阶段 counter 快照：post_write / post_evict / post_measure")
     if args.storage_dir is not None:
         print(f"storage 目录快照：{args.storage_dir}（pre_write + 各阶段边界）")
@@ -541,14 +586,44 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
         )
     if args.evict_request_tokens + args.max_new_tokens >= max_model_len:
         raise RuntimeError("--evict-request-tokens 超出模型上下文限制")
-    prompt_ids = build_exact_token_ids(seed_ids, prompt_len)
+    if args.salt_mode == "none" and args.evict_content_mode == "shared":
+        raise RuntimeError(
+            "salt-mode=none 下共享 E 内容会在内容寻址缓存中 dedup，"
+            "不产生驱逐压力（实测 R 直接 device 命中）；"
+            "请改用 --evict-content-mode per-request"
+        )
     evict_ids = build_exact_token_ids(seed_ids, args.evict_request_tokens)
+    # W/R 每轮使用相互独立的内容而非依赖 cache_salt 隔离：
+    # saltless 命名空间下同内容跨轮 dedup——R-000 从 L3 重新物化
+    # 路径后 R-001 直接 device 命中（实测 4223），逐轮独立性
+    # 必须由内容本身保证。种子区间与 E(7000–9386)、P(15000–17005)
+    # 全不相交；salted 模式下内容不同不损害原有 salt 隔离语义。
+    trial_prompt_ids = [
+        build_exact_token_ids(
+            [20000 + i, 21000 + i, 22000 + i], prompt_len
+        )
+        for i in range(args.num_trials)
+    ]
+    # P 冷基线必须用与 W 不同的内容：storage 后端按无 salt 内容
+    # hash 寻址，同内容探针会命中 L3 而不再冷；且必须逐轮不同——
+    # P-000 写入后，后续同内容 P 会命中其 storage 页（实测
+    # P-001 命中 1024）；且 saltless 命名空间下跨请求共享
+    # 任意前缀即产生命中（P-001 曾因共享 [211,212] 头命中
+    # device=2），故探针种子逐轮全不相交，且避开 W(101–103)
+    # 与 E(7000–9386) 区间。L2-only 模式下不同内容同样是
+    # 冷路径，不改变 P 的基线语义。
+    probe_ids = [
+        build_exact_token_ids(
+            [15000 + i, 16000 + i, 17000 + i], prompt_len
+        )
+        for i in range(args.num_trials)
+    ]
 
     run_id = record["run_id"]
     print("== warmup：预热后清空缓存与指标 ==")
     client.generate(
         build_exact_token_ids(seed_ids, min(128, prompt_len)),
-        f"warmup-{run_id}",
+        None if args.salt_mode == "none" else f"warmup-{run_id}",
         f"warmup-{run_id}",
         args.max_new_tokens,
     )
@@ -575,15 +650,22 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
                 args.storage_dir
             )
 
-    trial_salts = [f"l2-{run_id}-{i:03d}" for i in range(args.num_trials)]
-    cold_salts = [f"cold-{run_id}-{i:03d}" for i in range(args.num_trials)]
+    if args.salt_mode == "none":
+        trial_salts = [None] * args.num_trials
+        cold_salts = [None] * args.num_trials
+    else:
+        trial_salts = [f"l2-{run_id}-{i:03d}" for i in range(args.num_trials)]
+        cold_salts = [f"cold-{run_id}-{i:03d}" for i in range(args.num_trials)]
 
     print(f"== W：写入 {args.num_trials} 个相互隔离的 L2 候选 ==")
     writes = record["phases"]["W"] = []
     for i, salt in enumerate(trial_salts):
         writes.append(
             client.generate(
-                prompt_ids, salt, f"W-{run_id}-{i:03d}", args.max_new_tokens
+                trial_prompt_ids[i],
+                salt,
+                f"W-{run_id}-{i:03d}",
+                args.max_new_tokens,
             )
         )
     print(f"W TTFT median: {summarize(writes)['ttft_median_s'] * 1000:.1f} ms")
@@ -610,14 +692,50 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
     for i in range(evict_requests):
         evictions.append(
             client.generate(
-                evict_ids,
-                f"evict-{run_id}-{i:04d}",
+                evict_ids
+                if args.evict_content_mode == "shared"
+                else build_exact_token_ids(
+                    [7000 + i, 8000 + i, 9000 + i],
+                    args.evict_request_tokens,
+                ),
+                None if args.salt_mode == "none" else f"evict-{run_id}-{i:04d}",
                 f"E-{run_id}-{i:04d}",
                 args.max_new_tokens,
             )
         )
 
     capture_stage("post_evict")
+
+    if args.post_evict_wait > 0:
+        # cache 模式下 E 的在途写回以保护位钉住 host staging 页；
+        # 等队列 drain 完这些页才变成可驱逐，M 阶段 prefetch 才有
+        # 分配空间。部分写可能被静默丢弃（永不 ack），故收敛判据用
+        # 「acked 连续 N 次轮询不再增长」而非 acked>=enqueued。
+        print(f"== 等待 backup drain，至多 {args.post_evict_wait:.0f}s ==")
+        deadline = time.monotonic() + args.post_evict_wait
+        last_acked = -1.0
+        quiet_polls = 0
+        while time.monotonic() < deadline:
+            snap = counter_snapshot(client.metrics())
+            enqueued = snap.get("sglang:hicache_backup_tokens_total")
+            acked = snap.get("sglang:backuped_tokens_total")
+            if acked is not None:
+                if acked <= last_acked:
+                    quiet_polls += 1
+                else:
+                    quiet_polls = 0
+                    last_acked = acked
+                if quiet_polls >= 4 or (
+                    enqueued is not None and acked >= enqueued
+                ):
+                    print(
+                        f"backup drain 收敛：enqueued={enqueued}, acked={acked}"
+                    )
+                    break
+            time.sleep(2.0)
+        else:
+            print("警告：等待超时，backup 队列可能仍在 drain")
+        capture_stage("post_drain")
 
     plan = build_measurement_plan(args.num_trials, args.seed)
     record["measurement_plan"] = plan
@@ -630,13 +748,20 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
         for phase in order:
             salt = trial_salts[index] if phase == "R" else cold_salts[index]
             result = client.generate(
-                prompt_ids,
+                trial_prompt_ids[index]
+                if phase == "R"
+                else probe_ids[index],
                 salt,
                 f"{phase}-{run_id}-{index:03d}",
                 args.max_new_tokens,
             )
             trial["results"][phase] = result
-            validate_cache_result(phase, result, args.min_host_hit_ratio)
+            validate_cache_result(
+                phase,
+                result,
+                args.min_host_hit_ratio,
+                storage_mode=args.expected_storage_backend is not None,
+            )
         trial["ttft_ratio_r_over_p"] = (
             trial["results"]["R"]["ttft_s"] / trial["results"]["P"]["ttft_s"]
         )

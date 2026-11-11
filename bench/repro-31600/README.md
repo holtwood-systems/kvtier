@@ -19,10 +19,13 @@
 脚本不会仅凭请求顺序猜测缓存命中：
 
 - 通过 `/tokenize` 构造精确等长的 `input_ids`，不再用字符数估算 token 数；
-- 每轮 W/R 共用一个 `cache_salt`，不同轮次及 P/E 请求使用独立 salt；
+- 默认 `per-request` salt：每轮 W/R 共用一对独立 `cache_salt` 且逐轮使用
+  不同 prompt 内容（不依赖 salt 做逐轮隔离）；P/E 使用独立 salt 与内容；
+  `--salt-mode none` 可全部省略 salt（验证 L3 命中归属的机制对照臂）；
 - 从 `/server_info` 读取实际 device `token_capacity`，据此生成超过容量的驱逐流量；
-- R 请求必须报告足量 `cached_tokens_details.host`（开启 storage 后端时为
-  `host + storage` 分层命中），P 请求必须为零命中，否则整次实验标记为失败；
+- R 请求必须报告命中：开启 storage 后端时要求 `cached_tokens_details.storage > 0`
+  （L3 路径存在性），否则要求 `host + storage ≥ min_host_hit_ratio × 输入`；
+  P 请求必须为零命中，否则整次实验标记为失败；
 - Prometheus 的 backup、eviction、load-back counter 都必须出现正增量；
 - **L3（`--expected-storage-backend` 非空）额外要求路径证据**：结果包须含
   `metrics.stage_counters`（post_write/post_evict/post_measure 分阶段 counter 快照），
@@ -91,6 +94,24 @@ python3 workload.py \
 MEM_FRACTION=0.75 HICACHE_RATIO=5.0 HICACHE_IO=direct \
   MODEL_PATH=/path/to/model bash run_server.sh
 ```
+
+### L3 机制对照臂
+
+file 后端下可用以下参数构造机制分离实验（见
+`evidence/2026-11-11-wsl2-rtx5070ti-l3-*/README.md` 的对照结果）：
+
+- `--salt-mode none`：全请求不携带 `cache_salt`。salted 臂的
+  `index_evicted` 并非存储缺失，而是 prefetch 以 anchor=root 的
+  `salt=None` 插入路径、带 salt 的 re-match 不可见；saltless 臂可
+  归属命中（本机实测 R `storage=640–999`）。
+- `--evict-content-mode per-request`：saltless 下必需——共享 E 内容
+  在内容寻址缓存中 dedup，不产生驱逐压力（有护栏硬检查）。
+- `--post-evict-wait <秒>`：E 后等待 backup 队列 drain（静默收敛
+  轮询；丢弃写永不 ack）。cache 模式下不等待会导致 prefetch staging
+  分配与在途写回竞争 host 池，后续 R 被静默撤销。
+- `HICACHE_HOST_MEMORY_MODE=buffer_only bash run_server.sh`：host 池
+  仅作 staging、不驻留 L2，storage 命中经 staged prefetch 直接归属，
+  不依赖 radix 路径可见性（本机 6/6 clean complete）。
 
 如果自动驱逐后 R 没有达到默认 90% host 命中率，脚本会失败。应先检查结果包里的
 `eviction`、`cached_tokens_details` 和 counter 增量，再决定是否提高
