@@ -115,4 +115,4 @@ device-evicted 且未 `protect_host` 的叶子）：
   链式）离线确认 6 条 content 的 4224 个 key 全部存在于盘——R 失败
   不是存储缺失。
 - 验证：29/29 unittest；`npm run verify-notes`。
-- DEV-20 在 career-prep 维持「已实施待复核」，结论按上述三层机制修正。
+- DEV-20 在私有执行仓维持「已实施待复核」，结论按上述三层机制修正。
