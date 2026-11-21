@@ -1,0 +1,23 @@
+== [e4-buffer] GPU 窗口申请（协调协议，WINDOW_MODE=shared） ==
+== [e4-buffer] GPU 基线核验 ==
+utc=2026-11-21T03:59:30Z memory_used_mib=1 window_mode=shared need_mib=8000
+compute_apps:
+<none>
+coexistence:
+== [e4-buffer] 清空 storage 目录 /data/hicache-l3/repro-49221/e4-buffer ==
+== [e4-buffer] 启动服务（日志 /root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/e4-buffer/server.log） ==
+== [e4-buffer] 等待 /health（至多 600s） ==
+health ok after 35s
+[2026-11-21 04:00:00 PID11730] Allocating kv hierarchical KV host pool: 65600 tokens, 0.81 GB host memory.
+== [e4-buffer] 运行 workload（phase-set=gradient） ==
+2026-11-21T04:00:17Z [seed] conc=1 wall=2.7s cached_sum=0 storage_hits=0/32 ttft_med=0.074s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 188544.0, 'acked': 188544.0, 'converged': True}
+2026-11-21T04:00:29Z [serial] conc=1 wall=6.1s cached_sum=188544 storage_hits=32/32 ttft_med=0.187s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:00:40Z [burst4] conc=4 wall=4.3s cached_sum=194560 storage_hits=32/32 ttft_med=0.523s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:00:53Z [burst8] conc=8 wall=7.2s cached_sum=194560 storage_hits=32/32 ttft_med=1.096s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:01:03Z [burst16] conc=16 wall=4.9s cached_sum=194560 storage_hits=32/32 ttft_med=2.242s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:01:13Z [burst32] conc=32 wall=5.0s cached_sum=194560 storage_hits=32/32 ttft_med=2.975s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:01:18Z [cold-probe] cached_tokens_details={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T04:01:18Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/e4-buffer/results/results-20261121T040007Z.json
+== [e4-buffer] 停止服务 ==
+/root/src/kvtier/bench/repro-49221/run_arm.sh: line 155: 11680 Killed                  setsid env "${SERVER_ENV[@]}" STORAGE_DIR="$STORAGE_DIR" PORT="$PORT" bash "$RUN_SERVER" > "$EVIDIR/server.log" 2>&1
+== [e4-buffer] 完成（workload exit=0） ==

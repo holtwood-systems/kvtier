@@ -1,0 +1,24 @@
+== [j4-timeout] GPU 窗口申请（协调协议，WINDOW_MODE=shared） ==
+== [j4-timeout] GPU 基线核验 ==
+utc=2026-11-21T04:20:35Z memory_used_mib=1 window_mode=shared need_mib=20000
+compute_apps:
+<none>
+coexistence:
+== [j4-timeout] 清空 storage 目录 /data/hicache-l3/repro-49221/j4-timeout ==
+== [j4-timeout] 启动服务（日志 /root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/j4-timeout/server.log） ==
+== [j4-timeout] 等待 /health（至多 600s） ==
+health ok after 45s
+[2026-11-21 04:21:12 PID13941] Allocating kv hierarchical KV host pool: 65600 tokens, 9.67 GB host memory.
+== [j4-timeout] 运行 workload（phase-set=judgment） ==
+2026-11-21T04:22:00Z [seed] conc=1 wall=13.5s cached_sum=0 storage_hits=0/32 ttft_med=0.421s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 150016.0, 'acked': 150016.0, 'converged': True}
+2026-11-21T04:23:09Z [serial] conc=1 wall=59.8s cached_sum=125696 storage_hits=21/32 ttft_med=2.232s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 24320.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 218880.0, 'acked': 218880.0, 'converged': True}
+2026-11-21T04:23:32Z [burst16-a] conc=16 wall=13.8s cached_sum=29184 storage_hits=5/32 ttft_med=5.680s unfulfilled={'below_threshold': 0.0, 'host_capacity': 4480.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 48640.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 57536.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 378112.0, 'acked': 378112.0, 'converged': True}
+2026-11-21T04:23:49Z [burst16-b] conc=16 wall=10.9s cached_sum=59904 storage_hits=10/32 ttft_med=4.791s unfulfilled={'below_threshold': 0.0, 'host_capacity': 2432.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 6976.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 76608.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 509632.0, 'acked': 509632.0, 'converged': True}
+2026-11-21T04:24:02Z [burst32] conc=32 wall=7.8s cached_sum=96320 storage_hits=17/32 ttft_med=4.388s unfulfilled={'below_threshold': 0.0, 'host_capacity': 7040.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 6080.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 6080.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 607872.0, 'acked': 607872.0, 'converged': True}
+2026-11-21T04:24:22Z [repeat32-a] conc=32 wall=12.3s cached_sum=45120 storage_hits=8/32 ttft_med=6.145s unfulfilled={'below_threshold': 0.0, 'host_capacity': 7104.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 51136.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 24320.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 753216.0, 'acked': 753216.0, 'converged': True}
+2026-11-21T04:24:37Z [repeat32-b] conc=32 wall=8.6s cached_sum=98112 storage_hits=17/32 ttft_med=4.403s unfulfilled={'below_threshold': 0.0, 'host_capacity': 5248.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 6080.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 12160.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 849664.0, 'acked': 849664.0, 'converged': True}
+2026-11-21T04:24:43Z [cold-probe] cached_tokens_details={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T04:24:43Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/j4-timeout/results/results-20261121T042121Z.json
+== [j4-timeout] 停止服务 ==
+/root/src/kvtier/bench/repro-49221/run_arm.sh: line 159: 13898 Killed                  setsid env "${SERVER_ENV[@]}" STORAGE_DIR="$STORAGE_DIR" PORT="$PORT" bash "$RUN_SERVER" > "$EVIDIR/server.log" 2>&1
+== [j4-timeout] 完成（workload exit=0） ==

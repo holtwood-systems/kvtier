@@ -1,0 +1,18 @@
+== [j1-baseline] GPU 窗口申请（协调协议，WINDOW_MODE=shared） ==
+== [j1-baseline] GPU 基线核验 ==
+utc=2026-11-21T04:01:28Z memory_used_mib=1 window_mode=shared need_mib=20000
+compute_apps:
+<none>
+coexistence:
+== [j1-baseline] 清空 storage 目录 /data/hicache-l3/repro-49221/j1-baseline ==
+== [j1-baseline] 启动服务（日志 /root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/j1-baseline/server.log） ==
+== [j1-baseline] 等待 /health（至多 600s） ==
+health ok after 95s
+[2026-11-21 04:02:41 PID12074] Allocating kv hierarchical KV host pool: 65600 tokens, 9.67 GB host memory.
+== [j1-baseline] 运行 workload（phase-set=judgment） ==
+2026-11-21T04:03:30Z [seed] conc=1 wall=13.5s cached_sum=0 storage_hits=0/32 ttft_med=0.421s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T04:03:36Z 负载失败：403 Client Error: Forbidden for url: http://127.0.0.1:31000/start_profile
+2026-11-21T04:03:36Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/j1-baseline/results/results-20261121T040305Z.json
+== [j1-baseline] 停止服务 ==
+/root/src/kvtier/bench/repro-49221/run_arm.sh: line 155: 12031 Killed                  setsid env "${SERVER_ENV[@]}" STORAGE_DIR="$STORAGE_DIR" PORT="$PORT" bash "$RUN_SERVER" > "$EVIDIR/server.log" 2>&1
+== [j1-baseline] 完成（workload exit=1） ==

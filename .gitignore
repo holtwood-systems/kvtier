@@ -20,3 +20,15 @@ third_party/nano-vllm/
 
 # Local sgl-kernel source-build dependency cache (tarballs + unpacked trees)
 deps-sglk/
+
+# 2026-11-20/21 证据包策展：重型原始 artifacts 按仓库纪律（同 2026-11-11 先例）
+# 留档实验机/本地，不入库；审计结论以 README / metrics-final / arm_verdicts 为准
+bench/repro-31600/evidence/2026-11-20-main-dualarm/SMOKE/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/A1/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/A2/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/A3/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/A3W/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/A4/results/
+bench/repro-31600/evidence/2026-11-20-main-dualarm/C2/results/
+bench/repro-31600/evidence/2026-11-20-repro-49221/prof-archive/
+bench/repro-31600/evidence/2026-11-20-repro-49221/j2-baseline-rerun/results/

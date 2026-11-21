@@ -1,0 +1,16 @@
+2026-11-21T01:47:25Z == warmup：预热后清空缓存与指标 ==
+2026-11-21T01:47:25Z == W：写入 6 个相互隔离的 L2 候选 ==
+2026-11-21T01:47:26Z W TTFT median: 103.4 ms
+2026-11-21T01:47:26Z == 等待 10.0s，让 write_through 备份完成 ==
+2026-11-21T01:47:36Z == E：456 个独立请求，共 466944 tokens（device capacity=358532） ==
+2026-11-21T01:47:55Z == 等待 backup drain，至多 240s ==
+2026-11-21T01:49:04Z backup drain 收敛：enqueued=74638.0, acked=74638.0
+2026-11-21T01:49:06Z == M：逐轮配对测量 R(L2 reload) 与 P(cold prefill) ==
+2026-11-21T01:49:08Z trial 00 PR: ratio=22.885, R cache={'device': 0, 'host': 0, 'storage': 384}
+2026-11-21T01:49:10Z trial 01 PR: ratio=20.770, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T01:49:13Z trial 02 RP: ratio=16.932, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T01:49:15Z trial 03 RP: ratio=26.841, R cache={'device': 0, 'host': 0, 'storage': 512}
+2026-11-21T01:49:17Z trial 04 RP: ratio=28.697, R cache={'device': 0, 'host': 0, 'storage': 384}
+2026-11-21T01:49:19Z trial 05 PR: ratio=25.722, R cache={'device': 0, 'host': 0, 'storage': 256}
+2026-11-21T01:49:20Z 配对 TTFT R/P median=24.304；该结果只描述本次单卡 L2 微基准，不代表复现 #31600。
+2026-11-21T01:49:21Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A2/results/results-20261121T014724Z.json

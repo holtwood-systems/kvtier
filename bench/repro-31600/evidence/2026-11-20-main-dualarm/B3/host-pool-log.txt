@@ -1,0 +1,1 @@
+[2026-11-21 02:11:22 PID7396] Allocating kv hierarchical KV host pool: 43024 tokens, 0.53 GB host memory.

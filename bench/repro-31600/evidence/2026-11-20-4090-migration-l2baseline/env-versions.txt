@@ -1,0 +1,9 @@
+uv uv 0.13.9 (x86_64-unknown-linux-gnu)
+torch 2.11.0+cu128
+torchaudio 2.11.0+cu128
+torchvision 0.26.0+cu128
+sgl_kernel 0.4.6.post1
+sglang 0.0.0.dev1+g6afee75f9
+transformers 5.12.1
+flashinfer 0.6.17
+cuda 12.8 | gpu: NVIDIA GeForce RTX 4090

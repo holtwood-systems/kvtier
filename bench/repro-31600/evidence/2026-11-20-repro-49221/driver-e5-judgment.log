@@ -1,0 +1,24 @@
+== [e5-judgment] GPU 窗口申请（协调协议，WINDOW_MODE=shared） ==
+== [e5-judgment] GPU 基线核验 ==
+utc=2026-11-21T03:53:33Z memory_used_mib=1 window_mode=shared need_mib=8000
+compute_apps:
+<none>
+coexistence:
+== [e5-judgment] 清空 storage 目录 /data/hicache-l3/repro-49221/e5-judgment ==
+== [e5-judgment] 启动服务（日志 /root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/e5-judgment/server.log） ==
+== [e5-judgment] 等待 /health（至多 600s） ==
+health ok after 35s
+[2026-11-21 03:54:01 PID10619] Allocating kv hierarchical KV host pool: 65600 tokens, 0.81 GB host memory.
+== [e5-judgment] 运行 workload（phase-set=judgment） ==
+2026-11-21T03:54:20Z [seed] conc=1 wall=3.4s cached_sum=0 storage_hits=0/32 ttft_med=0.100s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 156096.0, 'acked': 156096.0, 'converged': True}
+2026-11-21T03:54:33Z [serial] conc=1 wall=5.5s cached_sum=156096 storage_hits=26/32 ttft_med=0.181s unfulfilled={'below_threshold': 0.0, 'host_capacity': 0.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 0.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 194560.0, 'acked': 194560.0, 'converged': True}
+2026-11-21T03:54:40Z [burst16-a] conc=16 wall=2.6s cached_sum=41472 storage_hits=7/32 ttft_med=1.136s unfulfilled={'below_threshold': 0.0, 'host_capacity': 3584.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 100864.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 347648.0, 'acked': 347648.0, 'converged': True}
+2026-11-21T03:54:48Z [burst16-b] conc=16 wall=2.5s cached_sum=42560 storage_hits=7/32 ttft_med=1.217s unfulfilled={'below_threshold': 0.0, 'host_capacity': 2240.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 101120.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 497600.0, 'acked': 497600.0, 'converged': True}
+2026-11-21T03:54:56Z [burst32] conc=32 wall=2.2s cached_sum=76416 storage_hits=13/32 ttft_med=1.083s unfulfilled={'below_threshold': 0.0, 'host_capacity': 2624.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 30400.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 615744.0, 'acked': 615744.0, 'converged': True}
+2026-11-21T03:55:03Z [repeat32-a] conc=32 wall=2.1s cached_sum=83904 storage_hits=14/32 ttft_med=1.095s unfulfilled={'below_threshold': 0.0, 'host_capacity': 1216.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 36480.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 726400.0, 'acked': 726400.0, 'converged': True}
+2026-11-21T03:55:12Z [repeat32-b] conc=32 wall=2.2s cached_sum=83904 storage_hits=14/32 ttft_med=1.055s unfulfilled={'below_threshold': 0.0, 'host_capacity': 1216.0, 'device_capacity': 0.0, 'device_covered': 0.0, 'storage_transfer': 0.0, 'deadline': 0.0, 'anchor_lost': 0.0, 'aux_window_trim': 0.0, 'device_overlap': 0.0, 'cache_admission_shortfall': 42560.0, 'dropped': 0.0, 'already_cached': 0.0} drain={'enqueued': 835456.0, 'acked': 835456.0, 'converged': True}
+2026-11-21T03:55:17Z [cold-probe] cached_tokens_details={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T03:55:17Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-repro-49221/e5-judgment/results/results-20261121T035409Z.json
+== [e5-judgment] 停止服务 ==
+/root/src/kvtier/bench/repro-49221/run_arm.sh: line 155: 10576 Killed                  setsid env "${SERVER_ENV[@]}" STORAGE_DIR="$STORAGE_DIR" PORT="$PORT" bash "$RUN_SERVER" > "$EVIDIR/server.log" 2>&1
+== [e5-judgment] 完成（workload exit=0） ==

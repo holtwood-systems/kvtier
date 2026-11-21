@@ -1,0 +1,10 @@
+[2026-11-21T03:53:33Z] arm e1-gradient rc=0
+[2026-11-21T03:55:27Z] arm e5-judgment rc=0
+[2026-11-21T03:57:12Z] arm e3-timeout rc=0
+[2026-11-21T03:59:30Z] arm e2-ratio12 rc=0
+[2026-11-21T04:01:28Z] arm e4-buffer rc=0
+[2026-11-21T04:03:46Z] arm j1-baseline rc=0
+[2026-11-21T04:10:35Z] arm j2-baseline-rerun rc=0
+[2026-11-21T04:20:34Z] arm j3-ratio12 rc=0
+[2026-11-21T04:24:54Z] arm j4-timeout rc=0
+[2026-11-21T04:24:54Z] ALL-SEQUENCE DONE

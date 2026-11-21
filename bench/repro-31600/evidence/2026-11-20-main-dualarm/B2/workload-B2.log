@@ -1,0 +1,16 @@
+2026-11-21T02:03:25Z == warmup：预热后清空缓存与指标 ==
+2026-11-21T02:03:26Z == W：写入 6 个相互隔离的 L2 候选 ==
+2026-11-21T02:03:26Z W TTFT median: 118.8 ms
+2026-11-21T02:03:26Z == 等待 10.0s，让 write_through 备份完成 ==
+2026-11-21T02:03:36Z == E：456 个独立请求，共 466944 tokens（device capacity=358532） ==
+2026-11-21T02:04:06Z == 等待 backup drain，至多 240s ==
+2026-11-21T02:04:55Z backup drain 收敛：enqueued=85902.0, acked=85902.0
+2026-11-21T02:04:55Z == M：逐轮配对测量 R(L2 reload) 与 P(cold prefill) ==
+2026-11-21T02:04:56Z trial 00 PR: ratio=6.244, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:56Z trial 01 PR: ratio=8.783, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:57Z trial 02 RP: ratio=10.412, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:58Z trial 03 RP: ratio=8.369, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:58Z trial 04 RP: ratio=9.423, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:59Z trial 05 PR: ratio=9.023, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:59Z 基准失败：指标 sglang:load_back_tokens_total 没有正增量，无法证明目标缓存路径已执行（failure_classification=index_evicted）
+2026-11-21T02:04:59Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B2/results/results-20261121T020324Z.json

@@ -1,0 +1,7 @@
+[2026-11-20T07:06:46] device=NVIDIA GeForce RTX 4090 total=47.50GiB free=47.12GiB
+[2026-11-20T07:06:46] D2D copy 4GiB: 0.009s -> 937.0 GB/s effective (8GiB traffic)
+[2026-11-20T07:06:46] filling 43 blocks x 1GiB (int64 pattern)
+[2026-11-20T07:06:46] fill done
+[2026-11-20T07:16:46] mid verify @iter 8874 ...
+[2026-11-20T07:26:47] mid verify @iter 17730 ...
+[2026-11-20T07:31:47] rounds=22147 ALL PASS

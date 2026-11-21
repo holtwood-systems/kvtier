@@ -1,0 +1,10 @@
+2026-11-21T02:25:08Z == warmup：预热后清空缓存与指标 ==
+2026-11-21T02:25:08Z == W：写入 6 个相互隔离的 L2 候选 ==
+2026-11-21T02:25:09Z W TTFT median: 95.2 ms
+2026-11-21T02:25:09Z == 等待 10.0s，让 write_through 备份完成 ==
+2026-11-21T02:25:19Z == E：456 个独立请求，共 466944 tokens（device capacity=358532） ==
+2026-11-21T02:25:40Z == 等待 backup drain，至多 240s ==
+2026-11-21T02:29:41Z 警告：等待超时，backup 队列可能仍在 drain
+2026-11-21T02:29:43Z == M：逐轮配对测量 R(L2 reload) 与 P(cold prefill) ==
+2026-11-21T02:39:43Z 基准失败：HTTPConnectionPool(host='127.0.0.1', port=31000): Read timed out.（failure_classification=index_evicted）
+2026-11-21T02:39:44Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A3W/results/results-20261121T022507Z.json

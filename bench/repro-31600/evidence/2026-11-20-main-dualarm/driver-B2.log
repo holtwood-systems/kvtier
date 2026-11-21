@@ -1,0 +1,46 @@
+== [B2] GPU 窗口申请（协调协议） ==
+== [B2] GPU 独占核验 ==
+utc=2026-11-21T02:02:48Z memory_used_mib=1
+compute_apps:
+<none>
+== [B2] G0-5：清空 storage 目录 /data/hicache-l3/dualarm/B2 ==
+== [B2] 启动服务（日志 /root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B2/server.log） ==
+== [B2] 等待 /health（至多 420s） ==
+health ok after 35s
+== [B2] G0-1：启动日志 host pool 换算核对 ==
+[2026-11-21 02:03:18 PID6774] Allocating kv hierarchical KV host pool: 43024 tokens, 0.53 GB host memory.
+== [B2] 旁证采集：1 Hz 采样器 + nvidia-smi dmon ==
+== [B2] 运行 workload（diagnostic，trials=6） ==
+2026-11-21T02:03:25Z == warmup：预热后清空缓存与指标 ==
+2026-11-21T02:03:26Z == W：写入 6 个相互隔离的 L2 候选 ==
+2026-11-21T02:03:26Z W TTFT median: 118.8 ms
+2026-11-21T02:03:26Z == 等待 10.0s，让 write_through 备份完成 ==
+2026-11-21T02:03:36Z == E：456 个独立请求，共 466944 tokens（device capacity=358532） ==
+2026-11-21T02:04:06Z == 等待 backup drain，至多 240s ==
+2026-11-21T02:04:55Z backup drain 收敛：enqueued=85902.0, acked=85902.0
+2026-11-21T02:04:55Z == M：逐轮配对测量 R(L2 reload) 与 P(cold prefill) ==
+2026-11-21T02:04:56Z trial 00 PR: ratio=6.244, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:56Z trial 01 PR: ratio=8.783, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:57Z trial 02 RP: ratio=10.412, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:58Z trial 03 RP: ratio=8.369, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:58Z trial 04 RP: ratio=9.423, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:59Z trial 05 PR: ratio=9.023, R cache={'device': 0, 'host': 0, 'storage': 0}
+2026-11-21T02:04:59Z 基准失败：指标 sglang:load_back_tokens_total 没有正增量，无法证明目标缓存路径已执行（failure_classification=index_evicted）
+2026-11-21T02:04:59Z 结果包：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B2/results/results-20261121T020324Z.json
+workload exit=1
+== [B2] 采集最终 /metrics 与 /server_info 全文 ==
+== [B2] 停止服务 ==
+/root/src/kvtier/bench/repro-main-dualarm/run_arm_full.sh: line 131:  6731 Killed                  setsid bash "$RUN_ARM" "$ARM" > "$EVIDIR/server.log" 2>&1
+== [B2] 完成：/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B2（workload exit=1） ==
+total 444
+drwxr-xr-x 3 root root   4096 Nov 21 02:04 .
+drwxr-xr-x 9 root root   4096 Nov 21 02:02 ..
+-rw-r--r-- 1 root root  11266 Nov 21 02:05 dmon-B2.log
+-rw-r--r-- 1 root root     64 Nov 21 02:02 gpu-baseline.txt
+-rw-r--r-- 1 root root    106 Nov 21 02:03 host-pool-log.txt
+-rw-r--r-- 1 root root 114301 Nov 21 02:04 metrics-final.txt
+drwxr-xr-x 2 root root     51 Nov 21 02:04 results
+-rw-r--r-- 1 root root  48346 Nov 21 02:04 samples-B2.jsonl
+-rw-r--r-- 1 root root  39408 Nov 21 02:04 server-info-final.json
+-rw-r--r-- 1 root root 215079 Nov 21 02:05 server.log
+-rw-r--r-- 1 root root   1452 Nov 21 02:04 workload-B2.log

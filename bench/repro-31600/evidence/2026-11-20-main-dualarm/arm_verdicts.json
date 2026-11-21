@@ -1,0 +1,626 @@
+{
+  "benchmark": "repro-main-dualarm-verdict",
+  "prefix_tokens": 4224,
+  "l2_threshold": 2112.0,
+  "l3_threshold": 3801.6,
+  "verdicts": [
+    {
+      "arm": "A1",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A1/results/results-20261121T014501Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "file",
+        "host_mode": "cache",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          512,
+          640,
+          384,
+          272,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 4,
+        "storage_median": 328.0,
+        "residence_grade": "L1_path_exists",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 14668.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 21115.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795225588.0,
+        "host_used": 43008.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9996281145407214
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 14668.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 4639.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      },
+      "g1_check": {
+        "coverage_ge_5of6": false,
+        "median_ge_l2": false,
+        "m_deltas_lt_256": false,
+        "host_used_le_90pct": false
+      }
+    },
+    {
+      "arm": "A2",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A2/results/results-20261121T014724Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "file",
+        "host_mode": "cache",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          384,
+          0,
+          0,
+          512,
+          384,
+          256
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 4,
+        "storage_median": 320.0,
+        "residence_grade": "L1_path_exists",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 6733.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 16892.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795225746.0,
+        "host_used": 43008.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9996281145407214
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 6733.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 8623.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      },
+      "g1_check": {
+        "coverage_ge_5of6": false,
+        "median_ge_l2": false,
+        "m_deltas_lt_256": false,
+        "host_used_le_90pct": false
+      }
+    },
+    {
+      "arm": "A3",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A3/results/results-20261121T015008Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "file",
+        "host_mode": "buffer_only",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 0.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 21115.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795226081.0,
+        "host_used": 38912.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9044254369654147
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 0.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 21115.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      }
+    },
+    {
+      "arm": "A4",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/A4/results/results-20261121T020546Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "file",
+        "host_mode": "buffer_only",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 0.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 25338.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795227025.0,
+        "host_used": 38912.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9044254369654147
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 0.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 25338.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      }
+    },
+    {
+      "arm": "B1",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B1/results/results-20261121T020138Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "fast_file",
+        "host_mode": "cache",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 25338.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 25338.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795226555.0,
+        "host_used": 43008.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9996281145407214
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 25338.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 0.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      },
+      "g1_check": {
+        "coverage_ge_5of6": false,
+        "median_ge_l2": false,
+        "m_deltas_lt_256": false,
+        "host_used_le_90pct": false
+      }
+    },
+    {
+      "arm": "B2",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B2/results/results-20261121T020324Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "fast_file",
+        "host_mode": "cache",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 25338.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 25338.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795226695.0,
+        "host_used": 43008.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9996281145407214
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 25338.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 0.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      },
+      "g1_check": {
+        "coverage_ge_5of6": false,
+        "median_ge_l2": false,
+        "m_deltas_lt_256": false,
+        "host_used_le_90pct": false
+      }
+    },
+    {
+      "arm": "B3",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B3/results/results-20261121T021127Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "fast_file",
+        "host_mode": "buffer_only",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 0.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 8446.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795227358.0,
+        "host_used": 38912.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9044254369654147
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 0.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 8446.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      }
+    },
+    {
+      "arm": "B4",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/B4/results/results-20261121T021655Z.json",
+      "g0": {
+        "host_pool_tokens": 43024,
+        "host_pool_expected": 43024,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "fast_file",
+        "host_mode": "buffer_only",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 0,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 0.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 8446.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795227684.0,
+        "host_used": 38912.0,
+        "host_total": 43024.0,
+        "used_ratio": 0.9044254369654147
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 0.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 8446.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      }
+    },
+    {
+      "arm": "C2",
+      "results_file": "/root/src/kvtier/bench/repro-31600/evidence/2026-11-20-main-dualarm/C2/results/results-20261121T015545Z.json",
+      "g0": {
+        "host_pool_tokens": 172096,
+        "host_pool_expected": 172095,
+        "host_pool_within_2pct": true,
+        "device_token_capacity": 358532,
+        "device_capacity_within_2pct": true,
+        "backend": "file",
+        "host_mode": "cache",
+        "write_policy": "write_through",
+        "tp": 1,
+        "commit": "e183c415bdfc5995f6288b1651e1c320c6a74015"
+      },
+      "r_coverage": {
+        "n": 6,
+        "storage_values": [
+          0,
+          0,
+          0,
+          128,
+          0,
+          0
+        ],
+        "host_values": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "hit_trials": 1,
+        "storage_median": 0.0,
+        "residence_grade": "L0_none",
+        "p_all_cold": true
+      },
+      "m_phase_deltas": {
+        "host_capacity": 0.0,
+        "dropped": 0.0,
+        "below_threshold": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "prefetch_hit_tokens": 8446.0
+      },
+      "host_water_at_m_start": {
+        "m_start_epoch": 1795226432.0,
+        "host_used": 172032.0,
+        "host_total": 172096.0,
+        "used_ratio": 0.9996281145407214
+      },
+      "run_total_unfulfilled": {
+        "below_threshold": 0.0,
+        "host_capacity": 0.0,
+        "device_capacity": 0.0,
+        "device_covered": 0.0,
+        "storage_transfer": 0.0,
+        "deadline": 8318.0,
+        "anchor_lost": 0.0,
+        "aux_window_trim": 0.0,
+        "device_overlap": 0.0,
+        "cache_admission_shortfall": 0.0,
+        "dropped": 0.0,
+        "already_cached": 0.0
+      }
+    }
+  ]
+}
