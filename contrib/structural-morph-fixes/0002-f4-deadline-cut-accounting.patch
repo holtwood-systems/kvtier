@@ -1,0 +1,139 @@
+From 8b57130ed3ef12d0883def7d8db7353b8bbdb266 Mon Sep 17 00:00:00 2001
+From: holtwood-systems <dev@holtwood-systems.invalid>
+Date: Sat, 21 Nov 2026 13:40:04 +0800
+Subject: [PATCH 2/3] observability(hicache): count deadline cuts that book no
+ verdict
+
+Under the timeout stop policy, a lookup terminated before its result was
+drained from the prefetch pipeline books nothing: _finish_storage_prefetch
+finds no remaining tokens, so no hit, unfulfilled, or retry outcome is
+recorded. Externally the request is indistinguishable from a storage
+miss, which reads exactly like a lost index in triage.
+
+Count those cuts where they happen: when an admission poll finishes a
+deadline-expired lookup whose hit was never recorded, emit one WARNING
+with the request id and queried span and bump a new event counter,
+storage_prefetch_deadline_cut_lookups_total, named to sit with the
+storage_prefetch_* family. Event-denominated on purpose -- it must not
+pollute the hit = fulfilled + unfulfilled token identity.
+
+No control flow changes.
+---
+ .../srt/mem_cache/unified_radix_cache.py      | 25 +++++++++++++++++++
+ .../srt/observability/metrics_collector.py    | 14 +++++++++++
+ .../observability/test_stat_loggers_di.py     | 24 ++++++++++++++++++
+ 3 files changed, 63 insertions(+)
+
+diff --git a/python/sglang/srt/mem_cache/unified_radix_cache.py b/python/sglang/srt/mem_cache/unified_radix_cache.py
+index e156d3c..0dc09ef 100644
+--- a/python/sglang/srt/mem_cache/unified_radix_cache.py
++++ b/python/sglang/srt/mem_cache/unified_radix_cache.py
+@@ -3076,6 +3076,11 @@ class UnifiedRadixCache(BasePrefixCache):
+         self.cache_controller.terminate_prefetch(operation)
+         if operation.host_indices is None:
+             if operation.deadline_expired:
++                if request not in self._storage_prefetch_hit_remaining_by_reqid:
++                    # The lookup was cut before its verdict was drained into
++                    # accounting: no hit/unfulfilled tokens will be booked, so
++                    # surface it here or it reads as a plain storage miss.
++                    self._log_storage_prefetch_deadline_cut_lookup(operation)
+                 self._finish_storage_prefetch(request, 0, reason="deadline")
+             else:
+                 self.storage_prefetch_retries.poll_miss(request.rid)
+@@ -3381,6 +3386,26 @@ class UnifiedRadixCache(BasePrefixCache):
+                 unfulfilled, reason
+             )
+ 
++    def _log_storage_prefetch_deadline_cut_lookup(
++        self, operation: PrefetchOperation
++    ) -> None:
++        """Count a timeout-policy cut that landed before any hit accounting.
++
++        When the stop-policy vote terminates a lookup whose result was never
++        drained from the prefetch pipeline, the finish below finds no
++        remaining tokens and books nothing: the request looks exactly like a
++        storage miss. Observability only -- this changes no control flow.
++        """
++        logger.warning(
++            "Storage prefetch cut by the timeout policy before its hit was "
++            "recorded: req=%s queried_tokens=%d (no hit or unfulfilled tokens "
++            "will be booked; retries were already cancelled)",
++            operation.handle.rid,
++            len(operation.hash_value) * self.page_size,
++        )
++        if self.enable_storage_metrics and self.storage_metrics_collector is not None:
++            self.storage_metrics_collector.log_storage_prefetch_deadline_cut_lookup()
++
+     def _settle_storage_prefetch_hit(
+         self, request: CacheRequestHandle, credited_tokens: int
+     ) -> None:
+diff --git a/python/sglang/srt/observability/metrics_collector.py b/python/sglang/srt/observability/metrics_collector.py
+index 582c7b8..b79b727 100644
+--- a/python/sglang/srt/observability/metrics_collector.py
++++ b/python/sglang/srt/observability/metrics_collector.py
+@@ -2354,6 +2354,15 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
+                 **self.labels, reason=reason
+             )
+ 
++        self.storage_prefetch_deadline_cut_lookups_total = Counter(
++            name="sglang:storage_prefetch_deadline_cut_lookups_total",
++            documentation="Storage lookups terminated by the timeout stop "
++            "policy before their verdict was drained into accounting: no "
++            "hit, unfulfilled, or retry outcome is booked, so externally "
++            "these read as storage misses. Event count, not tokens.",
++            labelnames=labels.keys(),
++        )
++
+         self.backup_dropped_tokens_total = Counter(
+             name="sglang:hicache_backup_dropped_tokens_total",
+             documentation="Buffer-mode backup tokens that never reached L3 "
+@@ -2460,6 +2469,11 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
+                 **self.labels, reason=reason
+             ).inc(num_tokens)
+ 
++    def log_storage_prefetch_deadline_cut_lookup(self) -> None:
++        self.storage_prefetch_deadline_cut_lookups_total.labels(
++            **self.labels
++        ).inc()
++
+     def log_backup_dropped_tokens(self, dropped_tokens: int):
+         if dropped_tokens > 0:
+             self.backup_dropped_tokens_total.labels(**self.labels).inc(dropped_tokens)
+diff --git a/test/registered/unit/observability/test_stat_loggers_di.py b/test/registered/unit/observability/test_stat_loggers_di.py
+index 83f02ee..f957f3f 100644
+--- a/test/registered/unit/observability/test_stat_loggers_di.py
++++ b/test/registered/unit/observability/test_stat_loggers_di.py
+@@ -226,6 +226,30 @@ class TestHiCacheMetrics(unittest.TestCase):
+             [({**labels, "reason": "device_capacity"}, 7)],
+         )
+ 
++    def test_deadline_cut_lookup_metric_counts_events_without_token_dimension(
++        self,
++    ):
++        """A lookup cut before its verdict is booked must not need tokens.
++
++        The counter exists because such a cut books no hit/unfulfilled tokens
++        at all; it stays event-denominated so it cannot pollute the
++        hit = fulfilled + sum(unfulfilled) identity.
++        """
++        labels = {"model_name": "test"}
++        collector = _RecordingStorageMetricsCollector(labels=labels)
++
++        collector.log_storage_prefetch_deadline_cut_lookup()
++        collector.log_storage_prefetch_deadline_cut_lookup()
++
++        self.assertEqual(
++            collector.storage_prefetch_deadline_cut_lookups_total.increments,
++            [(labels, 1), (labels, 1)],
++        )
++        self.assertEqual(
++            collector.storage_prefetch_deadline_cut_lookups_total.labelnames,
++            tuple(labels.keys()),
++        )
++
+ 
+ class TestDeferredKVReleaseMetrics(CustomTestCase):
+     def setUp(self):
+-- 
+2.43.0
+

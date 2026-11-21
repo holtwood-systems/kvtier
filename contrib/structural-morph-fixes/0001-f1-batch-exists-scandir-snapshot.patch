@@ -1,0 +1,254 @@
+From 70be57cd8761f0ce44c7c6a66a75dd40885a11a2 Mon Sep 17 00:00:00 2001
+From: holtwood-systems <dev@holtwood-systems.invalid>
+Date: Sat, 21 Nov 2026 13:40:03 +0800
+Subject: [PATCH 1/3] perf(hicache): snapshot HiCacheFile.batch_exists with one
+ scandir
+
+The inherited batch_exists serially stats every key, which on the file
+backend is one directory lookup per page, executed by the single
+hicache-prefetch thread while the single hicache-backup thread creates
+tmp+rename files in the same directory. At page_size=1 a
+multi-thousand-page lookup then spends seconds in per-key stats and can
+dominate the prefetch budget under that contention.
+
+When the plain layout allows it (legacy suffixes, no metadata cache, at
+least _BATCH_EXISTS_SCANDIR_MIN_KEYS keys), take one os.scandir snapshot
+of the directory and answer the longest consecutive prefix from name
+presence:
+
+- the snapshot is conservative under concurrency: pages written after
+  the scan read as missing -- the same window a single stat would see --
+  and writer temporaries (".<uuid>.tmp" and "*.bin.tmp.*") never match,
+  because only names ending in ".bin" are collected;
+- an enabled evictor re-checks the hit prefix per key, so a page evicted
+  after the scan cannot surface as a false hit;
+- unified chunk files, metadata-cache lookups, and small batches keep
+  the inherited per-key path, so no other layout changes behavior.
+
+On an idle directory the win is modest (single-digit ms per 4096-page
+query); the target is the contended case, where one O(directory) pass
+replaces thousands of individually interruptible stats.
+---
+ .../sglang/srt/mem_cache/hicache_storage.py   |  53 +++++++
+ .../test_hicache_file_batch_exists.py         | 145 ++++++++++++++++++
+ 2 files changed, 198 insertions(+)
+ create mode 100644 test/registered/unit/mem_cache/test_hicache_file_batch_exists.py
+
+diff --git a/python/sglang/srt/mem_cache/hicache_storage.py b/python/sglang/srt/mem_cache/hicache_storage.py
+index 806c172..ab1c856 100644
+--- a/python/sglang/srt/mem_cache/hicache_storage.py
++++ b/python/sglang/srt/mem_cache/hicache_storage.py
+@@ -1156,6 +1156,59 @@ class HiCacheFile(HiCacheStorage):
+     def exists(self, key: str) -> bool:
+         return all(self._file_exists(stem) for stem in self._get_component_keys(key))
+ 
++    # Below this many keys, per-key stats beat a whole-directory scan.
++    _BATCH_EXISTS_SCANDIR_MIN_KEYS = 32
++
++    def batch_exists(
++        self, keys: List[str], extra_info: Optional[HiCacheStorageExtraInfo] = None
++    ) -> int:
++        """Answer from one directory snapshot when the layout allows it.
++
++        The inherited loop stats every key -- one directory lookup per page on
++        this backend -- on the single prefetch thread, while the single backup
++        thread creates tmp+rename files in the same directory; at page_size=1
++        that contention can make a multi-thousand-page query the slowest phase
++        of a prefetch. One scandir turns it into a single O(directory) pass.
++
++        Only the plain layout is snapshotted: one ``.bin`` file per key
++        (legacy suffixes, no metadata cache). Unified chunk files,
++        metadata-cached lookups, and small batches keep the per-key path.
++
++        The snapshot is conservative under concurrency: pages written after
++        the scan read as missing (the same window a single stat would see),
++        and writer temporaries (``.<uuid>.tmp`` / ``*.bin.tmp.*``) never match
++        because only names ending in ``.bin`` are collected. When an evictor
++        is enabled, the hit prefix is re-checked per key so a page evicted
++        after the scan cannot surface as a false hit.
++        """
++        if (
++            self._unified_suffixes is not None
++            or self.metadata_cache is not None
++            or len(keys) < self._BATCH_EXISTS_SCANDIR_MIN_KEYS
++        ):
++            return super().batch_exists(keys, extra_info)
++        try:
++            with os.scandir(self.file_path) as entries:
++                names = {
++                    entry.name for entry in entries if entry.name.endswith(".bin")
++                }
++        except OSError:
++            # A missing or unreadable directory holds nothing, as with stat.
++            return 0
++        hit = 0
++        for key in keys:
++            if not all(
++                f"{stem}.bin" in names for stem in self._get_component_keys(key)
++            ):
++                break
++            hit += 1
++        if hit and self._evictor.enabled:
++            # The snapshot may predate an eviction: re-stat the hit prefix.
++            for i in range(hit):
++                if not self.exists(keys[i]):
++                    return i
++        return hit
++
+     def _file_exists(self, key: str) -> bool:
+         # Unified chunks may be shared with a differently sharded deployment,
+         # whose evictor cannot invalidate this instance's metadata cache.
+diff --git a/test/registered/unit/mem_cache/test_hicache_file_batch_exists.py b/test/registered/unit/mem_cache/test_hicache_file_batch_exists.py
+new file mode 100644
+index 0000000..8170b07
+--- /dev/null
++++ b/test/registered/unit/mem_cache/test_hicache_file_batch_exists.py
+@@ -0,0 +1,145 @@
++"""HiCacheFile.batch_exists answers from one directory snapshot.
++
++The inherited implementation stats every key serially; with page_size=1 the
++single prefetch thread then spends most of a multi-thousand-page query in
++per-key directory lookups that contend with the backup thread's tmp+rename
++writes. The scandir override must stay verdict-identical to the per-key
++loop for the plain layout, keep the fallback paths untouched, and never
++count writer temporaries or post-snapshot evictions as hits.
++
++CPU-only.
++
++    python -m pytest test/registered/unit/mem_cache/test_hicache_file_batch_exists.py -v
++"""
++
++from sglang.test.ci.ci_register import register_cpu_ci
++
++register_cpu_ci(est_time=4, suite="base-a-test-cpu")
++
++import os
++import shutil
++import tempfile
++import unittest
++import uuid
++from unittest.mock import patch
++
++import torch
++
++from sglang.srt.mem_cache.hicache_storage import HiCacheFile, HiCacheStorageConfig
++from sglang.test.test_utils import CustomTestCase
++
++
++def _config(model_name, extra_config=None):
++    return HiCacheStorageConfig(
++        tp_rank=0,
++        tp_size=1,
++        pp_rank=0,
++        pp_size=1,
++        attn_cp_rank=0,
++        attn_cp_size=1,
++        is_mla_model=False,
++        enable_storage_metrics=False,
++        is_page_first_layout=True,
++        model_name=model_name,
++        extra_config=extra_config,
++    )
++
++
++def _page_keys(count):
++    return [f"page-{i:05d}" for i in range(count)]
++
++
++class TestHiCacheFileBatchExists(CustomTestCase):
++    def _backend(self, root, extra_config=None):
++        return HiCacheFile(_config("org/model", extra_config), file_path=root)
++
++    def test_snapshot_agrees_with_the_per_key_loop(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root)
++            keys = _page_keys(64)
++            # A contiguous prefix plus spurious later pages: the verdict is
++            # the longest consecutive prefix, in both implementations.
++            for key in keys[:40] + keys[50:]:
++                self.assertTrue(backend.set(key, torch.zeros(16, dtype=torch.uint8)))
++            self.assertEqual(backend.batch_exists(keys), 40)
++            self.assertEqual(backend.batch_exists(keys[:41]), 40)
++            self.assertEqual(backend.batch_exists(keys[50:]), 14)
++
++    def test_missing_directory_reads_as_zero_hits(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(os.path.join(root, "sub"))
++            shutil.rmtree(os.path.join(root, "sub"))
++            self.assertEqual(backend.batch_exists(_page_keys(64)), 0)
++
++    def test_writer_temporaries_are_not_hits(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root)
++            keys = _page_keys(64)
++            for key in keys:
++                self.assertTrue(backend.set(key, torch.zeros(16, dtype=torch.uint8)))
++            # Both observed tmp schemes: ".<uuid>.tmp" (file backend) and
++            # "<key>.bin.tmp.<pid>.<tid>.<uuid>" (fast_file). Neither may
++            # resurrect a missing page as a snapshot hit.
++            for key in keys[10:]:
++                os.remove(os.path.join(root, f"{key}{backend.config_suffix}.bin"))
++            with open(os.path.join(root, f".{uuid.uuid4().hex}.tmp"), "wb"):
++                pass
++            with open(
++                os.path.join(
++                    root,
++                    f"{keys[10]}{backend.config_suffix}.bin.tmp.{os.getpid()}.0.x",
++                ),
++                "wb",
++            ):
++                pass
++            self.assertEqual(backend.batch_exists(keys), 10)
++
++    def test_small_batches_keep_the_per_key_path(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root)
++            keys = _page_keys(2)
++            self.assertTrue(backend.set(keys[0], torch.zeros(16, dtype=torch.uint8)))
++            # Below the scandir threshold the inherited serial loop runs.
++            self.assertEqual(backend.batch_exists(keys), 1)
++
++    def test_metadata_cache_lookups_keep_the_per_key_path(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root, {"enable_metadata_cache": True})
++            keys = _page_keys(64)
++            for key in keys[:30]:
++                self.assertTrue(backend.set(key, torch.zeros(16, dtype=torch.uint8)))
++            self.assertEqual(backend.batch_exists(keys), 30)
++
++    def test_enabled_evictor_rechecks_the_hit_prefix(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root, {"max_size": "1G"})
++            self.assertTrue(backend._evictor.enabled)
++            keys = _page_keys(64)
++            for key in keys:
++                self.assertTrue(backend.set(key, torch.zeros(16, dtype=torch.uint8)))
++            # A page evicted right after the scan must not survive as a hit:
++            # force the per-key recheck to see one gone from the snapshot.
++            missing = keys[20]
++            real_exists = HiCacheFile.exists
++
++            def exists_ignoring_one(self, key):
++                return False if key == missing else real_exists(self, key)
++
++            with patch.object(HiCacheFile, "exists", exists_ignoring_one):
++                self.assertEqual(backend.batch_exists(keys), 20)
++
++    def test_inert_evictor_does_not_recheck(self):
++        with tempfile.TemporaryDirectory() as root:
++            backend = self._backend(root)
++            self.assertFalse(backend._evictor.enabled)
++            keys = _page_keys(64)
++            for key in keys:
++                self.assertTrue(backend.set(key, torch.zeros(16, dtype=torch.uint8)))
++            with patch.object(
++                HiCacheFile, "exists", side_effect=AssertionError("recheck ran")
++            ):
++                self.assertEqual(backend.batch_exists(keys), 64)
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.43.0
+

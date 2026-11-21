@@ -1,0 +1,141 @@
+From d7df94988ffe049d6e6d311fa95f1d9b5d3975e5 Mon Sep 17 00:00:00 2001
+From: holtwood-systems <dev@holtwood-systems.invalid>
+Date: Sat, 21 Nov 2026 13:40:04 +0800
+Subject: [PATCH 3/3] fix(hicache): start the prefetch load budget at hit
+ allocation
+
+The timeout stop policy armed its whole budget (base + pages x
+per-page) at the first blocked admission poll, so the lookup, the host
+allocation, and the IO transfer all shared one window. After a slow
+lookup almost none of the budget was left for the transfer itself, and
+the per-tick vote cut loads that had barely begun.
+
+Split the phases:
+
+- the transfer budget is armed when a hit allocation actually launches
+  the read (cache-mode prefetch_buffer.put; buffer-mode
+  allocate_and_queue_prefetch success -- a parked allocation keeps it
+  unstarted), sized to the pages actually being loaded, since the span
+  may have been truncated to fit host capacity;
+- the lookup phase keeps only a loose guard -- four full budgets --
+  armed at the first blocked poll, so a wedged lookup still cannot
+  block admission forever; ordinary miss verdicts remain the retry
+  ladder's job;
+- refetches keep whatever budgets are already running, as before.
+---
+ .../srt/mem_cache/unified_radix_cache.py      | 60 +++++++++++++++++--
+ 1 file changed, 54 insertions(+), 6 deletions(-)
+
+diff --git a/python/sglang/srt/mem_cache/unified_radix_cache.py b/python/sglang/srt/mem_cache/unified_radix_cache.py
+index 0dc09ef..26d9e44 100644
+--- a/python/sglang/srt/mem_cache/unified_radix_cache.py
++++ b/python/sglang/srt/mem_cache/unified_radix_cache.py
+@@ -205,6 +205,10 @@ class _StoragePrefetchWait(msgspec.Struct):
+     timeout_s: float = 0.0
+     # Rank-agreed verdict of the per-tick vote; admission polls only read it.
+     expired: bool = False
++    # The lookup phase (submission -> hit allocation) is bounded separately:
++    # a loose cap, because the transfer budget no longer covers it.
++    query_timer: PollTimer = msgspec.field(default_factory=PollTimer)
++    query_timeout_s: float = 0.0
+ 
+ 
+ class _OngoingPrefetch(NamedTuple):
+@@ -2841,20 +2845,54 @@ class UnifiedRadixCache(BasePrefixCache):
+             # grants occupancy later at hit-alloc time, sized to the hit.
+             self.cache_controller.prefetch_tokens_occupied += len(prefetch_key)
+ 
++    def _storage_prefetch_query_cap(self, operation: PrefetchOperation) -> float:
++        """Loose bound on the lookup phase (submission -> hit allocation).
++
++        The transfer budget below no longer covers the lookup, so this guard
++        is what keeps a wedged lookup from blocking admission forever. Four
++        full budgets leaves slow-but-alive backends room; ordinary miss
++        verdicts are still the retry ladder's job, not this cap's.
++        """
++        pages = operation.stats_requested_tokens // self.page_size
++        return 4 * (
++            self.prefetch_timeout_base + pages * self.prefetch_timeout_per_page
++        )
++
+     def _start_storage_prefetch_wait(self, operation: PrefetchOperation) -> None:
+         if (
+             self.prefetch_stop_policy == "timeout"
+             and operation.handle not in self._storage_prefetch_wait
+         ):
+-            # Start at the first blocked admission poll; refetches keep this budget.
+-            pages = operation.stats_requested_tokens // self.page_size
++            # The lookup phase starts at the first blocked admission poll and
++            # keeps only the loose query cap; the transfer budget is armed at
++            # hit allocation (_start_storage_prefetch_load_wait). Refetches
++            # keep whatever budgets are already running.
+             wait = _StoragePrefetchWait(
+-                timeout_s=self.prefetch_timeout_base
+-                + pages * self.prefetch_timeout_per_page,
++                query_timeout_s=self._storage_prefetch_query_cap(operation)
+             )
+-            wait.timer.observe(ready=False)
++            wait.query_timer.observe(ready=False)
+             self._storage_prefetch_wait[operation.handle] = wait
+ 
++    def _start_storage_prefetch_load_wait(self, operation: PrefetchOperation) -> None:
++        """Arm the transfer budget at the hit-allocation launch point.
++
++        With the old first-blocked-poll start, lookup latency was charged to
++        the load budget: after a slow query little or none of it was left for
++        the transfer, so the vote cut loads that had barely begun.
++        """
++        if self.prefetch_stop_policy != "timeout":
++            return
++        wait = self._storage_prefetch_wait.setdefault(
++            operation.handle, _StoragePrefetchWait()
++        )
++        # Pages actually being loaded: the span may have been truncated to
++        # fit host capacity, and only those pages will transfer.
++        wait.timeout_s = (
++            self.prefetch_timeout_base
++            + len(operation.hash_value) * self.prefetch_timeout_per_page
++        )
++        wait.timer.observe(ready=False)
++
+     def _prefetch_deadline_expired(self, operation: PrefetchOperation) -> bool:
+         if operation.host_indices is not None and (
+             operation.completed_tokens >= len(operation.hash_value) * self.page_size
+@@ -2865,6 +2903,10 @@ class UnifiedRadixCache(BasePrefixCache):
+         return wait is not None and (
+             wait.expired
+             or (wait.timer.running and wait.timer.elapsed() > wait.timeout_s)
++            or (
++                wait.query_timer.running
++                and wait.query_timer.elapsed() > wait.query_timeout_s
++            )
+         )
+ 
+     def _mark_prefetch_deadline_expired(self, operation: PrefetchOperation) -> None:
+@@ -3811,9 +3853,14 @@ class UnifiedRadixCache(BasePrefixCache):
+                 info, hit_tokens, aux_hit_tokens = self._trim_buffer_prefetch_full_head(
+                     request, info, operation, full_match_len, hit_tokens
+                 )
+-                return self.buffer_pipeline.allocate_and_queue_prefetch(
++                launched = self.buffer_pipeline.allocate_and_queue_prefetch(
+                     operation, info, hit_tokens, aux_hit_tokens
+                 )
++                if launched:
++                    # False means the op parked without an allocation: the
++                    # transfer budget must not run while it waits to retry.
++                    self._start_storage_prefetch_load_wait(operation)
++                return launched
+             aux_hit_tokens = hit_tokens
+ 
+             # Hybrid pools (SWA / Mamba) are trailing-window aligned, so a
+@@ -3861,6 +3908,7 @@ class UnifiedRadixCache(BasePrefixCache):
+             operation.hash_value = operation.hash_value[: alloc_len // self.page_size]
+             operation.host_indices = host_indices
+             self.ongoing_prefetch[request] = info._replace(host_indices=host_indices)
++            self._start_storage_prefetch_load_wait(operation)
+             cc.prefetch_buffer.put(operation)
+             return True
+ 
+-- 
+2.43.0
+

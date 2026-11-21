@@ -1,0 +1,306 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: holtwood-systems <dev@holtwood-systems.invalid>
+Date: Fri, 21 Nov 2026 12:00:00 +0800
+Subject: [PATCH] feat(hicache): export storage prefetch outcome stats
+ dynamically
+
+Revive #36280 on current main, following the coordination ask in the
+#36474 review ("please coordinate with #36280" for the event-count
+export of `_prefetch_outcome_stats`).
+
+UnifiedRadixCache maintains 14 cumulative prefetch-outcome counters and
+snapshots them onto StorageMetrics in check_hicache_events, but the
+collector never exports them: declined/revoked prefetches are only
+visible through the #37503 token-dimension series, with no event counts.
+
+Instead of enumerating outcomes (the original branch hardcoded 6 keys
+and went stale when the dict grew to 14), export the snapshot
+dynamically:
+
+- every snapshot key becomes an `outcome` label, routed by unit: keys
+  ending in `_tokens` go to `storage_prefetch_outcome_tokens_total`,
+  everything else to `storage_prefetch_outcome_events_total`, named to
+  sit with the #37503 `storage_prefetch_*` family;
+- the source counters are cumulative on the cache side and may be reset
+  with the cache, so exports are monotonic deltas: a lower snapshot
+  starts a new epoch that re-exports its current value, never a
+  negative delta (carried over from #36280);
+- `prefetch_stats` is now a declared StorageMetrics field rather than a
+  dynamically injected attribute; the check_hicache_events feed assigns
+  it unconditionally, and a None/absent field is a no-op instead of an
+  AttributeError once the field is formalized.
+
+Tests cover monotonic-delta/new-epoch export, key dynamism (outcomes
+beyond the original six export unchanged), unit routing, and the
+None/absent-snapshot no-op.
+
+Credit: the delta/new-epoch export discipline and the original test
+scenario come from #36280 by @yikun-c.
+
+Closes #35808 (revives the slice originally landed as #36280)
+---
+ python/sglang/srt/mem_cache/unified_radix_cache.py     |   5 +-
+ python/sglang/srt/observability/metrics_collector.py   |  70 ++++++
+ .../unit/observability/test_stat_loggers_di.py         | 124 ++++++++++++++
+ 3 files changed, 197 insertions(+), 2 deletions(-)
+
+diff --git a/python/sglang/srt/mem_cache/unified_radix_cache.py b/python/sglang/srt/mem_cache/unified_radix_cache.py
+index e156d3c..1e86477 100644
+--- a/python/sglang/srt/mem_cache/unified_radix_cache.py
++++ b/python/sglang/srt/mem_cache/unified_radix_cache.py
+@@ -4569,8 +4569,9 @@ class UnifiedRadixCache(BasePrefixCache):
+             storage_metrics = self.cache_controller.storage_backend.get_stats()
+             if storage_metrics is None:
+                 storage_metrics = StorageMetrics()
+-            if not hasattr(storage_metrics, "prefetch_stats"):
+-                storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
++            # Always refresh: the snapshot field is declared on StorageMetrics,
++            # so a hasattr probe would find the default None and skip feeding.
++            storage_metrics.prefetch_stats = self.prefetch_outcome_stats_snapshot()
+             self.storage_metrics_collector.log_storage_metrics(storage_metrics)
+ 
+     def transfers_in_flight(self) -> bool:
+diff --git a/python/sglang/srt/observability/metrics_collector.py b/python/sglang/srt/observability/metrics_collector.py
+index 582c7b8..cd99730 100644
+--- a/python/sglang/srt/observability/metrics_collector.py
++++ b/python/sglang/srt/observability/metrics_collector.py
+@@ -2271,6 +2271,10 @@ class StorageMetrics:
+     backup_pgs: List[int] = field(default_factory=list)
+     prefetch_bandwidth: List[float] = field(default_factory=list)
+     backup_bandwidth: List[float] = field(default_factory=list)
++    # Snapshot of UnifiedRadixCache's cumulative prefetch-outcome counters,
++    # attached by the check_hicache_events feed before log_storage_metrics.
++    # None when the reporting path has no radix cache behind it.
++    prefetch_stats: Optional[Dict[str, float]] = None
+ 
+ 
+ class StorageMetricsCollector(_StatLoggerDIMixin):
+@@ -2354,6 +2358,41 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
+                 **self.labels, reason=reason
+             )
+ 
++        self._last_prefetch_outcome_stats: Dict[str, float] = {}
++
++        self.storage_prefetch_outcome_events_total = Counter(
++            name="sglang:storage_prefetch_outcome_events_total",
++            documentation=(
++                "Controller-classified L3 storage-prefetch outcomes exported "
++                "as event counts, keyed by outcome: attempts/issued at launch, "
++                "declined_* launch refusals, revoked_* post-issue revocations, "
++                "and l3_demand_requests at the rank-synced query outcome. The "
++                "key set follows UnifiedRadixCache's prefetch-outcome snapshot, "
++                "so a new outcome exports without collector changes; "
++                "token-denominated keys (ending in _tokens) are exported as "
++                "storage_prefetch_outcome_tokens_total instead. Source "
++                "counters are cumulative on the cache side and may be reset "
++                "with the cache: a lower snapshot starts a new epoch that "
++                "re-exports its current value, never a negative delta."
++            ),
++            labelnames=list(labels.keys()) + ["outcome"],
++        )
++
++        self.storage_prefetch_outcome_tokens_total = Counter(
++            name="sglang:storage_prefetch_outcome_tokens_total",
++            documentation=(
++                "Token-denominated keys of the L3 storage-prefetch outcome "
++                "snapshot (those ending in _tokens), exported with the same "
++                "delta/new-epoch discipline as "
++                "storage_prefetch_outcome_events_total. Complements the "
++                "#37503 token metrics, which count per-attempt transfer "
++                "outcomes: these keys carry the request-demand view "
++                "(l3_miss_tokens is the L3-miss portion of demanded tokens, "
++                "l1l2_miss_tokens the full demanded span)."
++            ),
++            labelnames=list(labels.keys()) + ["outcome"],
++        )
++
+         self.backup_dropped_tokens_total = Counter(
+             name="sglang:hicache_backup_dropped_tokens_total",
+             documentation="Buffer-mode backup tokens that never reached L3 "
+@@ -2432,6 +2471,32 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
+             buckets=bucket_bandwidth,
+         )
+ 
++    def log_prefetch_outcomes(self, prefetch_stats: Mapping[str, float]) -> None:
++        """Export cumulative cache-side prefetch-outcome counters.
++
++        UnifiedRadixCache owns the counters and may reset them while this
++        collector survives (e.g. a storage detach/reattach). A lower snapshot
++        therefore starts a new epoch: export its current value, never a
++        negative delta. Outcomes are not enumerated here — every snapshot key
++        is an `outcome` label, routed by unit (the *_tokens suffix to the
++        token counter, everything else to the event counter) so a new cache
++        side outcome needs no collector change.
++        """
++        for outcome, current_value in prefetch_stats.items():
++            current = max(float(current_value), 0.0)
++            previous = self._last_prefetch_outcome_stats.get(outcome, 0.0)
++            increment = current if current < previous else current - previous
++            if increment > 0:
++                if outcome.endswith("_tokens"):
++                    counter = self.storage_prefetch_outcome_tokens_total
++                else:
++                    counter = self.storage_prefetch_outcome_events_total
++                counter.labels(**self.labels, outcome=outcome).inc(increment)
++            # Retain the last seen value for keys that vanish from the
++            # snapshot too: pruning here would re-export the full counter
++            # from zero if the key later reappears with a higher value.
++            self._last_prefetch_outcome_stats[outcome] = current
++
+     def log_prefetched_tokens(self, prefetched_tokens: int):
+         if prefetched_tokens > 0:
+             self.prefetched_tokens_total.labels(**self.labels).inc(prefetched_tokens)
+@@ -2493,6 +2558,11 @@ class StorageMetricsCollector(_StatLoggerDIMixin):
+             self._log_histogram(self.histogram_prefetch_bandwidth, v)
+         for v in storage_metrics.backup_bandwidth:
+             self._log_histogram(self.histogram_backup_bandwidth, v)
++        # Attached by the check_hicache_events feed; stays None (or absent on
++        # a legacy StorageMetrics) when no radix cache backs this reporter.
++        prefetch_stats = getattr(storage_metrics, "prefetch_stats", None)
++        if prefetch_stats:
++            self.log_prefetch_outcomes(prefetch_stats)
+ 
+ 
+ class ExpertDispatchCollector(_StatLoggerDIMixin):
+diff --git a/test/registered/unit/observability/test_stat_loggers_di.py b/test/registered/unit/observability/test_stat_loggers_di.py
+index 83f02ee..cd29cd3 100644
+--- a/test/registered/unit/observability/test_stat_loggers_di.py
++++ b/test/registered/unit/observability/test_stat_loggers_di.py
+@@ -42,6 +42,7 @@ from sglang.srt.observability.metrics_collector import (
+     RadixCacheMetricsCollector,
+     SchedulerMetricsCollector,
+     SchedulerStats,
++    StorageMetrics,
+     StorageMetricsCollector,
+     TokenizerMetricsCollector,
+     radix_cache_metric_labels,
+@@ -226,6 +227,129 @@ class TestHiCacheMetrics(unittest.TestCase):
+             [({**labels, "reason": "device_capacity"}, 7)],
+         )
+ 
++    @staticmethod
++    def _storage_metrics(prefetch_stats):
++        metrics = StorageMetrics()
++        metrics.prefetch_stats = prefetch_stats
++        return metrics
++
++    @staticmethod
++    def _outcome_totals(metric):
++        totals = {}
++        for metric_labels, value in metric.increments:
++            outcome = metric_labels["outcome"]
++            totals[outcome] = totals.get(outcome, 0) + value
++        return totals
++
++    def test_storage_prefetch_outcomes_export_monotonic_deltas(self):
++        labels = {"model_name": "test"}
++        collector = _RecordingStorageMetricsCollector(labels=labels)
++
++        first = {"attempts": 2, "issued": 1, "revoked_full_miss": 1}
++        collector.log_storage_metrics(self._storage_metrics(first))
++        # A repeated identical flush must not double-count.
++        collector.log_storage_metrics(self._storage_metrics(first))
++
++        collector.log_storage_metrics(
++            self._storage_metrics(
++                {
++                    "attempts": 3,
++                    "issued": 2,
++                    "declined_rate_limited": 1,
++                    "revoked_full_miss": 1,
++                }
++            )
++        )
++        # A lower snapshot (the cache reset its counters while the collector
++        # survived) starts a new epoch: re-export the current value, never a
++        # negative delta.
++        collector.log_storage_metrics(
++            self._storage_metrics({"attempts": 1, "issued": 1})
++        )
++
++        totals = self._outcome_totals(collector.storage_prefetch_outcome_events_total)
++        self.assertEqual(totals["attempts"], 4)
++        self.assertEqual(totals["issued"], 3)
++        self.assertEqual(totals["declined_rate_limited"], 1)
++        self.assertEqual(totals["revoked_full_miss"], 1)
++
++    def test_storage_prefetch_outcomes_follow_snapshot_keys(self):
++        # The collector must not enumerate outcomes: every key of the cache's
++        # _prefetch_outcome_stats snapshot exports as it appears, including
++        # keys that postdate this test.
++        labels = {"model_name": "test"}
++        collector = _RecordingStorageMetricsCollector(labels=labels)
++
++        collector.log_storage_metrics(
++            self._storage_metrics(
++                {
++                    "issued_assumed_stored": 2,
++                    "declined_anchor_lost": 1,
++                    "declined_device_covered": 1,
++                    "declined_host_oversize": 1,
++                    "declined_unservable_prefix": 1,
++                    "revoked_insufficient": 3,
++                    "l3_demand_requests": 5,
++                }
++            )
++        )
++
++        self.assertEqual(
++            self._outcome_totals(collector.storage_prefetch_outcome_events_total),
++            {
++                "issued_assumed_stored": 2,
++                "declined_anchor_lost": 1,
++                "declined_device_covered": 1,
++                "declined_host_oversize": 1,
++                "declined_unservable_prefix": 1,
++                "revoked_insufficient": 3,
++                "l3_demand_requests": 5,
++            },
++        )
++        self.assertEqual(
++            collector.storage_prefetch_outcome_tokens_total.increments, []
++        )
++
++    def test_storage_prefetch_outcomes_route_token_denominated_keys(self):
++        # Suffix routing keeps units off the event counter: *_tokens keys are
++        # request-demand token totals, not prefetch events.
++        labels = {"model_name": "test"}
++        collector = _RecordingStorageMetricsCollector(labels=labels)
++
++        collector.log_storage_metrics(
++            self._storage_metrics(
++                {"attempts": 1, "l3_miss_tokens": 700, "l1l2_miss_tokens": 900}
++            )
++        )
++
++        self.assertEqual(
++            self._outcome_totals(collector.storage_prefetch_outcome_events_total),
++            {"attempts": 1},
++        )
++        self.assertEqual(
++            self._outcome_totals(collector.storage_prefetch_outcome_tokens_total),
++            {"l3_miss_tokens": 700, "l1l2_miss_tokens": 900},
++        )
++
++    def test_storage_prefetch_outcomes_skip_missing_stats(self):
++        labels = {"model_name": "test"}
++        collector = _RecordingStorageMetricsCollector(labels=labels)
++
++        # prefetch_stats defaults to None: no radix cache behind the reporter.
++        collector.log_storage_metrics(StorageMetrics())
++        # A legacy StorageMetrics from before the field was declared has no
++        # attribute to read; both must be a no-op, not an error.
++        legacy = StorageMetrics()
++        del legacy.prefetch_stats
++        collector.log_storage_metrics(legacy)
++
++        self.assertEqual(
++            collector.storage_prefetch_outcome_events_total.increments, []
++        )
++        self.assertEqual(
++            collector.storage_prefetch_outcome_tokens_total.increments, []
++        )
++
+ 
+ class TestDeferredKVReleaseMetrics(CustomTestCase):
+     def setUp(self):
