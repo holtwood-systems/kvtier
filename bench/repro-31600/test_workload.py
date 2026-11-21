@@ -11,6 +11,17 @@ _SPEC = importlib.util.spec_from_file_location("hicache_l2_workload", _MODULE_PA
 workload = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(workload)
 
+# main 的 storage prefetch 指标族样例（含带时间戳样本与 collector 预建的
+# 0 值序列）
+_MAIN_METRICS_TEXT = (
+    'sglang:storage_prefetch_unfulfilled_tokens_total{reason="host_capacity"} 256\n'
+    'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"} 128 1234567890\n'
+    'sglang:storage_prefetch_unfulfilled_tokens_total{reason="below_threshold"} 64\n'
+    'sglang:storage_prefetch_unfulfilled_tokens_total{reason="anchor_lost"} 0\n'
+    "sglang:storage_prefetch_hit_tokens_total 4096\n"
+    "sglang:storage_backup_failed_tokens_total 32\n"
+)
+
 
 class FakeResponse:
     def __init__(self, lines):
@@ -111,6 +122,30 @@ class WorkloadTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             workload.validate_cache_result("P", reload, 0.9)
 
+    def test_diagnostic_mode_records_l3_miss_instead_of_raising(self):
+        miss = {
+            "rid": "R-x",
+            "input_token_count": 100,
+            "cached_tokens_details": {"device": 0, "host": 0, "storage": 0},
+        }
+        # strict（默认）仍抛错——旧行为不受影响
+        with self.assertRaises(RuntimeError):
+            workload.validate_cache_result("R", miss, 0.9, storage_mode=True)
+        workload.validate_cache_result(
+            "R", miss, 0.9, storage_mode=True, expect_mode="diagnostic"
+        )
+        self.assertIs(miss.get("l3_diagnostic_miss"), True)
+        # 命中路径不写标记
+        hit = {
+            "rid": "R-y",
+            "input_token_count": 100,
+            "cached_tokens_details": {"device": 0, "host": 0, "storage": 999},
+        }
+        workload.validate_cache_result(
+            "R", hit, 0.9, storage_mode=True, expect_mode="diagnostic"
+        )
+        self.assertNotIn("l3_diagnostic_miss", hit)
+
     def test_counter_delta_treats_unmaterialized_before_as_zero(self):
         before = {name: None for name in workload._COUNTER_NAMES}
         after = {name: 5.0 for name in workload._COUNTER_NAMES}
@@ -118,6 +153,112 @@ class WorkloadTest(unittest.TestCase):
             workload.counter_deltas(before, after),
             {name: 5.0 for name in workload._COUNTER_NAMES},
         )
+
+    def test_metric_reason_totals_aggregates_each_label(self):
+        totals = workload.metric_reason_totals(
+            _MAIN_METRICS_TEXT,
+            "sglang:storage_prefetch_unfulfilled_tokens_total",
+        )
+        self.assertEqual(
+            totals,
+            {
+                "host_capacity": 256.0,
+                "dropped": 128.0,
+                "below_threshold": 64.0,
+                "anchor_lost": 0.0,
+            },
+        )
+
+    def test_metric_reason_totals_sums_duplicate_reason_series(self):
+        metrics = (
+            'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"} 1\n'
+            'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"} 2\n'
+        )
+        self.assertEqual(
+            workload.metric_reason_totals(
+                metrics, "sglang:storage_prefetch_unfulfilled_tokens_total"
+            ),
+            {"dropped": 3.0},
+        )
+
+    def test_metric_reason_totals_absent_family_yields_empty_dict(self):
+        self.assertEqual(
+            workload.metric_reason_totals(
+                'sglang:load_back_tokens_total{pool="kv"} 12\n',
+                "sglang:storage_prefetch_unfulfilled_tokens_total",
+            ),
+            {},
+        )
+
+    def test_counter_snapshot_records_main_counters_and_reasons(self):
+        snapshot = workload.counter_snapshot(_MAIN_METRICS_TEXT)
+        self.assertEqual(snapshot["sglang:storage_prefetch_hit_tokens_total"], 4096.0)
+        self.assertEqual(
+            snapshot["sglang:storage_backup_failed_tokens_total"], 32.0
+        )
+        self.assertEqual(
+            snapshot[
+                'sglang:storage_prefetch_unfulfilled_tokens_total{reason="host_capacity"}'
+            ],
+            256.0,
+        )
+        self.assertEqual(
+            snapshot[
+                'sglang:storage_prefetch_unfulfilled_tokens_total{reason="below_threshold"}'
+            ],
+            64.0,
+        )
+
+    def test_counter_snapshot_without_main_metrics_keeps_legacy_shape(self):
+        snapshot = workload.counter_snapshot("sglang:backuped_tokens_total 8\n")
+        self.assertEqual(snapshot["sglang:backuped_tokens_total"], 8.0)
+        self.assertIsNone(snapshot["sglang:storage_prefetch_hit_tokens_total"])
+        self.assertIsNone(snapshot["sglang:storage_backup_failed_tokens_total"])
+        self.assertEqual(
+            [
+                key
+                for key in snapshot
+                if key.startswith("sglang:storage_prefetch_unfulfilled")
+            ],
+            [],
+        )
+
+    def test_counter_deltas_cover_reason_labels(self):
+        before = workload.counter_snapshot(_MAIN_METRICS_TEXT)
+        grown = _MAIN_METRICS_TEXT.replace(
+            '{reason="host_capacity"} 256', '{reason="host_capacity"} 512'
+        )
+        deltas = workload.counter_deltas(before, workload.counter_snapshot(grown))
+        self.assertEqual(
+            deltas[
+                'sglang:storage_prefetch_unfulfilled_tokens_total{reason="host_capacity"}'
+            ],
+            256.0,
+        )
+        self.assertEqual(
+            deltas[
+                'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"}'
+            ],
+            0.0,
+        )
+
+    def test_counter_deltas_stay_none_for_absent_main_counters(self):
+        empty = workload.counter_snapshot("")
+        deltas = workload.counter_deltas(empty, workload.counter_snapshot(""))
+        self.assertIsNone(deltas["sglang:storage_prefetch_hit_tokens_total"])
+        self.assertIsNone(deltas["sglang:storage_backup_failed_tokens_total"])
+        self.assertNotIn(
+            'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"}',
+            deltas,
+        )
+
+    def test_filter_metrics_captures_main_metric_lines(self):
+        filtered = workload.filter_metrics(_MAIN_METRICS_TEXT)
+        self.assertIn('reason="below_threshold"', filtered)
+        self.assertIn("sglang:storage_prefetch_hit_tokens_total 4096", filtered)
+        # 旧服务（6afee75f）的 /metrics 不含新指标族，过滤结果不受增补影响
+        legacy = workload.filter_metrics("sglang:backuped_tokens_total 8\n")
+        self.assertEqual(legacy, "sglang:backuped_tokens_total 8\n")
 
     def test_generate_parses_token_event_and_cache_details(self):
         event = (

@@ -121,6 +121,13 @@ def _validate_complete(record: dict) -> dict:
         args.get("min_host_hit_ratio"), "min_host_hit_ratio"
     )
     _expect(0 < min_host_hit_ratio <= 1, "min_host_hit_ratio 必须位于 (0, 1]")
+    # 旧包（6afee75f 时代）无该键；diagnostic = 实验 0 双臂的判定输入
+    # 模式：R storage=0 是矩阵数据而非结构错误（设计文档 §4）。
+    expect_mode = args.get("expect_mode", "strict")
+    _expect(
+        expect_mode in ("strict", "diagnostic"),
+        f"expect_mode={expect_mode!r} 无效",
+    )
 
     server = record.get("server")
     _expect(isinstance(server, dict), "complete 结果缺少 server")
@@ -196,10 +203,19 @@ def _validate_complete(record: dict) -> dict:
         p_details = _validate_generation(results["P"], f"trial {index}.P", prompt_len)
         if expected_backend is not None:
             # L3 臂判定标准是路径存在性（storage>0）；驻留率如实记录。
-            _expect(
-                r_details["storage"] > 0,
-                f"trial {index}.R 未形成 L3 命中",
-            )
+            # diagnostic 模式下 storage=0 合法（矩阵判定输入），只要求
+            # 出现 l3_diagnostic_miss 标记与 0 值一致。
+            if expect_mode == "diagnostic":
+                if r_details["storage"] <= 0:
+                    _expect(
+                        results["R"].get("l3_diagnostic_miss") is True,
+                        f"trial {index}.R storage=0 但缺少 l3_diagnostic_miss 标记",
+                    )
+            else:
+                _expect(
+                    r_details["storage"] > 0,
+                    f"trial {index}.R 未形成 L3 命中",
+                )
         else:
             _expect(
                 r_details["host"] + r_details["storage"]
@@ -220,7 +236,20 @@ def _validate_complete(record: dict) -> dict:
     deltas = metrics.get("counter_deltas")
     _expect(isinstance(deltas, dict), "complete 结果缺少 counter_deltas")
     for name in _REQUIRED_COUNTERS:
-        _number(deltas.get(name), f"metrics.counter_deltas.{name}", positive=True)
+        # diagnostic 模式允许 load_back 为 0（全部 R 冷时无回载，这正是
+        # 矩阵要记录的形态）；backup/evicted 仍必须为正。
+        _number(
+            deltas.get(name),
+            f"metrics.counter_deltas.{name}",
+            positive=not (expect_mode == "diagnostic" and name == "sglang:load_back_tokens_total"),
+        )
+    # main 新增指标（storage_prefetch_hit/unfulfilled{reason=...}/
+    # storage_backup_failed）与旧服务（6afee75f）的兼容：出现时仅核验
+    # 为有限数值（None/缺席 = 旧服务未导出，同样通过），不设正增量等
+    # 既有判据之外的新门槛。
+    for name, value in deltas.items():
+        if value is not None:
+            _number(value, f"metrics.counter_deltas.{name}")
 
     if expected_backend is not None:
         stage_counters = metrics.get("stage_counters")

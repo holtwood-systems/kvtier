@@ -108,6 +108,35 @@ def l3_complete_record():
     return record
 
 
+def main_metrics_complete_record():
+    """main 服务生成的包：新增 storage prefetch 指标（None = 旧服务缺失形态）。"""
+    record = l3_complete_record()
+    record["metrics"]["counter_deltas"].update(
+        {
+            "sglang:storage_prefetch_hit_tokens_total": 4096.0,
+            "sglang:storage_backup_failed_tokens_total": None,
+            'sglang:storage_prefetch_unfulfilled_tokens_total{reason="host_capacity"}': 256.0,
+            'sglang:storage_prefetch_unfulfilled_tokens_total{reason="dropped"}': 0.0,
+        }
+    )
+    return record
+
+
+def diagnostic_complete_record():
+    """diagnostic 模式的 L3 包：R storage=0 带 l3_diagnostic_miss 标记，
+    load_back 增量允许为 0（全冷 R 正是矩阵判定输入）。"""
+    record = l3_complete_record()
+    record["args"]["expect_mode"] = "diagnostic"
+    record["trials"][0]["results"]["R"]["cached_tokens_details"] = {
+        "device": 0,
+        "host": 0,
+        "storage": 0,
+    }
+    record["trials"][0]["results"]["R"]["l3_diagnostic_miss"] = True
+    record["metrics"]["counter_deltas"]["sglang:load_back_tokens_total"] = 0.0
+    return record
+
+
 class ValidateResultsTest(unittest.TestCase):
     def test_complete_record(self):
         result = validator.validate_record(complete_record())
@@ -175,6 +204,40 @@ class ValidateResultsTest(unittest.TestCase):
         }
         result = validator.validate_record(record)
         self.assertEqual(result["status"], "complete")
+
+    def test_complete_accepts_main_metric_counters(self):
+        result = validator.validate_record(main_metrics_complete_record())
+        self.assertEqual(result["status"], "complete")
+
+    def test_diagnostic_complete_allows_zero_storage_and_load_back(self):
+        result = validator.validate_record(diagnostic_complete_record())
+        self.assertEqual(result["status"], "complete")
+
+    def test_diagnostic_zero_storage_requires_miss_flag(self):
+        record = diagnostic_complete_record()
+        record["trials"][0]["results"]["R"].pop("l3_diagnostic_miss")
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(record)
+
+    def test_strict_mode_still_rejects_zero_storage(self):
+        # 同形状包不带 expect_mode（旧 strict 语义）必须继续报错
+        record = diagnostic_complete_record()
+        record["args"].pop("expect_mode")
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(record)
+
+    def test_complete_accepts_absent_main_metric_counters(self):
+        # 6afee75f 生成的包完全不含新指标键，旧判据原样通过
+        result = validator.validate_record(l3_complete_record())
+        self.assertEqual(result["status"], "complete")
+
+    def test_complete_rejects_non_numeric_main_counter(self):
+        record = main_metrics_complete_record()
+        record["metrics"]["counter_deltas"]["sglang:storage_prefetch_hit_tokens_total"] = (
+            "4096"
+        )
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_record(record)
 
     def test_failed_with_classification_is_valid(self):
         result = validator.validate_record(

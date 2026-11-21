@@ -35,6 +35,11 @@ _METRIC_NAMES = (
     "sglang:load_back_tokens_total",
     "sglang:load_back_bytes_total",
     "sglang:load_back_duration_seconds",
+    # main 新增（6afee75f 不导出）：storage prefetch 命中/未履约与
+    # L3 写失败族，见 docs/upstream/2026-11-20-bench-surface-audit.md §1.3。
+    "sglang:storage_prefetch_hit_tokens_total",
+    "sglang:storage_prefetch_unfulfilled_tokens_total",
+    "sglang:storage_backup_failed_tokens_total",
 )
 _COUNTER_NAMES = (
     "sglang:hicache_backup_tokens_total",
@@ -43,6 +48,19 @@ _COUNTER_NAMES = (
     "sglang:evicted_tokens_total",
     "sglang:load_back_tokens_total",
     "sglang:load_back_bytes_total",
+    # main 新增（#37503 族）：6afee75f 上不存在，metric_total 记 None，
+    # 不参与 validate_metric_deltas 等任何既有判据。
+    "sglang:storage_prefetch_hit_tokens_total",
+    "sglang:storage_backup_failed_tokens_total",
+)
+# 未履约族带 reason label，逐项解析为 `name{reason="..."}` 键并入 counter
+# 快照：collector 预建 11 个 label 值（未发射的 reason 以 0 序列出现在
+# /metrics），发射点实取 9 种（storage_transfer/deadline/already_cached/
+# dropped/anchor_lost/device_covered/below_threshold/host_capacity/
+# unservable_prefix，见审计报告 §1.3）。解析不预设名单，出现的 reason
+# 序列全部记录；6afee75f 上该族缺席，快照不含任何 reason 键。
+_REASON_METRIC_NAMES = (
+    "sglang:storage_prefetch_unfulfilled_tokens_total",
 )
 
 
@@ -83,6 +101,27 @@ def metric_total(metrics_text: str, metric_name: str) -> float | None:
         fields = line.rsplit(None, 2)
         values.append(float(fields[-2] if len(fields) == 3 else fields[-1]))
     return sum(values) if values else None
+
+
+def metric_reason_totals(metrics_text: str, metric_name: str) -> dict[str, float]:
+    """按 reason label 聚合 `name{reason="..."}` 样本；指标族缺席返回空 dict。"""
+    totals: dict[str, float] = {}
+    for line in metrics_text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        sample_name = line.split("{", 1)[0].split(None, 1)[0]
+        labels_start = line.find("{")
+        labels_end = line.rfind("}")
+        if sample_name != metric_name or labels_start == -1 or labels_end == -1:
+            continue
+        fields = line.rsplit(None, 2)
+        value = float(fields[-2] if len(fields) == 3 else fields[-1])
+        for pair in line[labels_start + 1 : labels_end].split(","):
+            key, sep, raw = pair.partition("=")
+            if sep and key.strip() == "reason":
+                reason = raw.strip().strip('"')
+                totals[reason] = totals.get(reason, 0.0) + value
+    return totals
 
 
 def filter_metrics(metrics_text: str) -> str:
@@ -316,6 +355,7 @@ def validate_cache_result(
     result: dict,
     min_host_hit_ratio: float,
     storage_mode: bool = False,
+    expect_mode: str = "strict",
 ) -> None:
     details = result["cached_tokens_details"]
     if phase == "R":
@@ -324,6 +364,13 @@ def validate_cache_result(
             # 分层驻留率（host+storage/input）如实记录但不作门槛——
             # storage 覆盖受写回与驱逐策略影响，本就可能是部分命中。
             if details["storage"] <= 0:
+                if expect_mode == "diagnostic":
+                    # 诊断模式（实验 0 双臂）：R storage=0 是预测矩阵的
+                    # 判定输入而非运行失败——记录标记后继续，保住后续
+                    # trial 的覆盖率数据（docs/bench-design/
+                    # 2026-11-20-repro-main-dualarm.md §4）。
+                    result["l3_diagnostic_miss"] = True
+                    return
                 raise RuntimeError(
                     f"{result['rid']} 未形成 L3 命中: details={details}"
                 )
@@ -415,16 +462,28 @@ def classify_failure(exc: BaseException, record: dict) -> str:
 
 
 def counter_snapshot(metrics_text: str) -> dict[str, float | None]:
-    return {name: metric_total(metrics_text, name) for name in _COUNTER_NAMES}
+    snapshot = {name: metric_total(metrics_text, name) for name in _COUNTER_NAMES}
+    for name in _REASON_METRIC_NAMES:
+        for reason, value in metric_reason_totals(metrics_text, name).items():
+            snapshot[f'{name}{{reason="{reason}"}}'] = value
+    return snapshot
 
 
 def counter_deltas(before: dict, after: dict) -> dict[str, float | None]:
-    return {
+    deltas = {
         name: (after[name] - (before[name] or 0.0))
         if after[name] is not None
         else None
         for name in _COUNTER_NAMES
     }
+    # reason 键只在指标族存在（main）时进入快照；6afee75f 上 before/after
+    # 均无这些键，deltas 同样不含。
+    for name in _REASON_METRIC_NAMES:
+        prefix = f'{name}{{reason="'
+        for key, value in after.items():
+            if key.startswith(prefix):
+                deltas[key] = value - (before.get(key) or 0.0)
+    return deltas
 
 
 def validate_metric_deltas(deltas: dict) -> None:
@@ -500,6 +559,14 @@ def parse_args() -> argparse.Namespace:
         "时必需——共享内容在内容寻址下会 dedup，不产生驱逐压力）",
     )
     parser.add_argument("--seed", type=int, default=31600)
+    parser.add_argument(
+        "--expect-mode",
+        choices=("strict", "diagnostic"),
+        default="strict",
+        help="R 判定模式：strict（默认，storage=0 抛错终止，产出 failed "
+        "包）或 diagnostic（storage=0 仅标记 l3_diagnostic_miss 并继续，"
+        "用于实验 0 双臂的预测矩阵覆盖率判定，需要全部 trial 的数据）",
+    )
     parser.add_argument("--timeout", type=float, default=600.0)
     parser.add_argument(
         "--sglang-commit",
@@ -761,6 +828,7 @@ def run_benchmark(args: argparse.Namespace, record: dict) -> None:
                 result,
                 args.min_host_hit_ratio,
                 storage_mode=args.expected_storage_backend is not None,
+                expect_mode=args.expect_mode,
             )
         trial["ttft_ratio_r_over_p"] = (
             trial["results"]["R"]["ttft_s"] / trial["results"]["P"]["ttft_s"]

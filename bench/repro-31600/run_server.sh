@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 启动用于 HiCache L2 单卡微基准的 SGLang 服务。
 # 用法：MODEL_PATH=/path/to/model bash run_server.sh
+# SGLANG_VER=main 时启用 main 的 flag 面适配（当前仅 cuda-graph 拆分）；
+# 默认（未设置）面向 6afee75f，输出与历史版本逐字节一致。
 set -euo pipefail
 
 MODEL_PATH="${MODEL_PATH:?需要设置 MODEL_PATH，例如 /root/models/Qwen2.5-7B-Instruct}"
@@ -11,6 +13,7 @@ HICACHE_IO="${HICACHE_IO:-kernel}"
 HICACHE_LAYOUT="${HICACHE_LAYOUT:-page_first}"
 KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-auto}"
 DISABLE_CUDA_GRAPH="${DISABLE_CUDA_GRAPH:-0}"
+SGLANG_VER="${SGLANG_VER:-}"
 # 可选 L3 后端（file/shm 等）；file 后端路径用
 # SGLANG_HICACHE_FILE_BACKEND_STORAGE_DIR 环境变量指定。
 HICACHE_STORAGE_BACKEND="${HICACHE_STORAGE_BACKEND:-}"
@@ -21,7 +24,14 @@ HICACHE_HOST_MEMORY_MODE="${HICACHE_HOST_MEMORY_MODE:-cache}"
 EXTRA_ARGS=()
 if [ "$DISABLE_CUDA_GRAPH" = "1" ]; then
   # 小显存 / 小内存单卡上跳过 graph 捕获：省下 host 预留并缩短启动。
-  EXTRA_ARGS+=(--disable-cuda-graph)
+  if [ "$SGLANG_VER" = "main" ]; then
+    # main 已移除 --disable-cuda-graph（REMOVED_FLAGS，传入即停机），
+    # 按其指引拆分为 prefill/decode 两个等价 flag
+    # （docs/upstream/2026-11-20-bench-surface-audit.md §1.1 A1）。
+    EXTRA_ARGS+=(--disable-prefill-cuda-graph --disable-decode-cuda-graph)
+  else
+    EXTRA_ARGS+=(--disable-cuda-graph)
+  fi
 fi
 if [ -n "$HICACHE_STORAGE_BACKEND" ]; then
   EXTRA_ARGS+=(--hicache-storage-backend "$HICACHE_STORAGE_BACKEND")
